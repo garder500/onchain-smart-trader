@@ -35,3 +35,6 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+http-body-util = "0.1"

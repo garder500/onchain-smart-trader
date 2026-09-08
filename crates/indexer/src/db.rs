@@ -491,20 +491,24 @@ impl Database {
 
     // --- Wallet Scores ---
     pub async fn save_wallet_score(&self, score: &WalletScore) -> Result<()> {
+        let dummy_wallet = Wallet::new(score.wallet_address.clone(), score.evaluated_at);
+        self.upsert_wallet(&dummy_wallet).await?;
+
         let factors_json = serde_json::to_value(&score.factors)?;
         let explanation_json = serde_json::to_value(&score.explanation)?;
 
         sqlx::query(
             r#"
             INSERT INTO wallet_scores (
-                wallet_address, overall_score, category, total_trades,
+                id, wallet_address, overall_score, category, total_trades,
                 winning_trades, losing_trades, win_rate, profit_factor,
                 realized_pnl, max_drawdown, early_entry_ratio, factors,
                 explanation, evaluated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             "#,
         )
+        .bind(uuid::Uuid::new_v4())
         .bind(score.wallet_address.as_str())
         .bind(score.overall_score)
         .bind(score.category.to_string())
@@ -597,17 +601,46 @@ impl Database {
 
     // --- Token Risk Scores ---
     pub async fn save_token_risk_score(&self, score: &TokenRiskScore) -> Result<()> {
+        if self
+            .get_token(score.token_address.as_str())
+            .await?
+            .is_none()
+        {
+            let t = Token {
+                address: score.token_address.clone(),
+                deployer: None,
+                creation_block: None,
+                creation_timestamp: Some(score.evaluated_at),
+                symbol: None,
+                name: None,
+                decimals: 18,
+                total_supply: None,
+                liquidity_usd: None,
+                holders_count: None,
+                top_holders: Vec::new(),
+                top_10_holder_concentration: None,
+                mint_capability: None,
+                pause_freeze_capability: None,
+                liquidity_lock_info: None,
+                is_honeypot: None,
+                created_at: score.evaluated_at,
+                updated_at: score.evaluated_at,
+            };
+            self.upsert_token(&t).await?;
+        }
+
         let factors_json = serde_json::to_value(&score.factors)?;
         let reasons_json = serde_json::to_value(&score.reasons)?;
 
         sqlx::query(
             r#"
             INSERT INTO token_risk_scores (
-                token_address, accepted, score, factors, reasons, evaluated_at
+                id, token_address, accepted, score, factors, reasons, evaluated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#,
         )
+        .bind(uuid::Uuid::new_v4())
         .bind(score.token_address.as_str())
         .bind(score.accepted)
         .bind(score.score)

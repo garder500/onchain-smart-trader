@@ -45,7 +45,7 @@ async fn test_database_idempotent_operations() {
 
     // 2. Wallet idempotency test
     let now = Utc::now();
-    let wallet_addr = WalletAddress::new(format!("0x{:040x}", 12345));
+    let wallet_addr = WalletAddress::new(format!("0x{:032x}00000000", Uuid::new_v4().as_u128()));
     let wallet = Wallet::new(wallet_addr.clone(), now);
 
     db.upsert_wallet(&wallet)
@@ -63,7 +63,7 @@ async fn test_database_idempotent_operations() {
     assert!(loaded_wallet.is_some());
 
     // 3. Token upsert test
-    let token_addr = TokenAddress::new(format!("0x{:040x}", 67890));
+    let token_addr = TokenAddress::new(format!("0x{:032x}11111111", Uuid::new_v4().as_u128()));
     let token = Token {
         address: token_addr.clone(),
         deployer: Some(wallet_addr.clone()),
