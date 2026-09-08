@@ -2,6 +2,7 @@ pub mod health;
 pub mod performance;
 pub mod portfolio;
 pub mod positions;
+pub mod research;
 pub mod signals;
 pub mod strategies;
 pub mod tokens;
@@ -28,5 +29,6 @@ pub fn create_router(state: AppState) -> Router {
         .merge(portfolio::router())
         .merge(performance::router())
         .merge(strategies::router())
+        .merge(research::router())
         .with_state(state)
 }

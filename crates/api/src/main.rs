@@ -10,9 +10,10 @@ use cli::{Cli, Commands};
 use domain::{AppConfig, TokenAddress, WalletAddress};
 use indexer::{Database, IndexerService};
 use rust_decimal::Decimal;
+use std::str::FromStr;
 use std::sync::Arc;
 use token_risk::TokenRiskEngine;
-use tracing::info;
+use tracing::{info, warn};
 use wallet_profiler::{calculate_wallet_score, MetricsCalculator, WalletContext};
 
 #[tokio::main]
@@ -27,11 +28,20 @@ async fn main() -> Result<()> {
     let config = AppConfig::from_env().context("Failed to load application configuration")?;
     let cli = Cli::parse();
 
-    let db = Database::connect(&config.database_url).await?;
-    db.run_migrations().await?;
+    let db_opt = match Database::connect(&config.database_url).await {
+        Ok(db) => {
+            let _ = db.run_migrations().await;
+            Some(db)
+        }
+        Err(e) => {
+            warn!("Could not connect to PostgreSQL: {}. Running in offline/synthetic mode if applicable.", e);
+            None
+        }
+    };
 
     match cli.command {
         Commands::Index => {
+            let db = db_opt.context("Database connection required for indexing")?;
             info!("Launching EVM blockchain indexer");
             let client = Arc::new(EvmClient::new(&config.rpc_http_url)?);
             let service = IndexerService::new(client, db);
@@ -39,6 +49,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::ProfileWallet { address } => {
+            let db = db_opt.context("Database connection required for ProfileWallet")?;
             let wallet_addr = WalletAddress::new(&address);
             let now = chrono::Utc::now();
             let trades = db.get_wallet_trades_before(&wallet_addr, now).await?;
@@ -67,6 +78,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::ScoreWallet { address } => {
+            let db = db_opt.context("Database connection required for ScoreWallet")?;
             let wallet_addr = WalletAddress::new(&address);
             let now = chrono::Utc::now();
             let trades = db.get_wallet_trades_before(&wallet_addr, now).await?;
@@ -112,6 +124,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::ScoreToken { address } => {
+            let db = db_opt.context("Database connection required for ScoreToken")?;
             let token_addr = TokenAddress::new(&address);
             let now = chrono::Utc::now();
 
@@ -210,6 +223,7 @@ async fn main() -> Result<()> {
         }
 
         Commands::Replay { from, to } => {
+            let db = db_opt.context("Database connection required for Replay")?;
             let start = chrono::DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", from))
                 .unwrap_or_else(|_| chrono::Utc::now().into())
                 .with_timezone(&chrono::Utc);
@@ -249,7 +263,94 @@ async fn main() -> Result<()> {
             println!("{}", report_str);
         }
 
+        Commands::Research {
+            source,
+            format,
+            out,
+        } => {
+            let data_source = match source.to_lowercase().as_str() {
+                "real" => research::DataSource::Real,
+                "mixed" => research::DataSource::Mixed,
+                _ => research::DataSource::Synthetic,
+            };
+
+            let trades = if data_source == research::DataSource::Synthetic {
+                routes::research::generate_synthetic_research_dataset()
+            } else if let Some(ref db) = db_opt {
+                let db_trades = db.get_all_trades(5000).await?;
+                if db_trades.is_empty() {
+                    warn!("No live trades found in DB; falling back to synthetic dataset");
+                    routes::research::generate_synthetic_research_dataset()
+                } else {
+                    db_trades
+                }
+            } else {
+                warn!("Database connection unavailable; running research on synthetic dataset");
+                routes::research::generate_synthetic_research_dataset()
+            };
+
+            let exp_config = research::ExperimentConfig {
+                data_source,
+                ..Default::default()
+            };
+
+            let git_commit = env!("CARGO_PKG_VERSION");
+            let report = research::ResearchRunner::run_experiment(&trades, &exp_config, git_commit);
+
+            let output_str = if format.to_lowercase() == "json" {
+                serde_json::to_string_pretty(&report)?
+            } else {
+                research::ReportGenerator::generate_markdown(&report)
+            };
+
+            if let Some(out_path) = out {
+                tokio::fs::write(&out_path, &output_str).await?;
+                println!("Research report successfully written to {}", out_path);
+            } else {
+                println!("{}", output_str);
+            }
+        }
+
+        Commands::Copyability { capital } => {
+            let cap_dec = Decimal::from_str(&capital).unwrap_or_else(|_| Decimal::from(1000));
+            let trades = routes::research::generate_synthetic_research_dataset();
+            let delays = vec![0, 1, 2, 5, 10, 15, 30, 60, 120];
+            let results =
+                research::CopiabilityEngine::evaluate_latency_matrix(&trades, &delays, cap_dec, 30);
+
+            println!(
+                "================================================================================"
+            );
+            println!(
+                "                COPIABILITY ENGINE: LATENCY DEGRADATION MATRIX                   "
+            );
+            println!(
+                "================================================================================"
+            );
+            println!(
+                "{:>10} | {:>15} | {:>10} | {:>15} | {:>12}",
+                "Delay (s)", "Net PnL ($)", "Win Rate", "Copy Efficiency", "Slippage ($)"
+            );
+            println!(
+                "--------------------------------------------------------------------------------"
+            );
+            for r in results {
+                println!(
+                    "{:>10} | {:>15.2} | {:>9.1}% | {:>14.2}x | {:>12.2}",
+                    format!("{}s", r.delay_seconds),
+                    r.net_pnl,
+                    r.win_rate * Decimal::from(100),
+                    r.copy_efficiency,
+                    r.slippage_incurred_usd
+                );
+            }
+            println!(
+                "================================================================================"
+            );
+        }
+
         Commands::Server => {
+            let db = db_opt.context("Database connection required for Server")?;
             server::run_server(config, db).await?;
         }
     }

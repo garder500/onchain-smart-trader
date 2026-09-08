@@ -9,6 +9,7 @@ members = [
     "crates/strategy",
     "crates/paper-trader",
     "crates/analytics",
+    "crates/research",
     "crates/api",
 ]
 
@@ -29,6 +30,7 @@ token-risk = { path = "crates/token-risk" }
 strategy = { path = "crates/strategy" }
 paper-trader = { path = "crates/paper-trader" }
 analytics = { path = "crates/analytics" }
+research = { path = "crates/research" }
 
 # Async & Runtime
 tokio = { version = "1.43", features = ["full"] }
@@ -51,6 +53,7 @@ toml = "0.8"
 rust_decimal = { version = "1.36", features = ["serde-with-str", "db-postgres", "maths"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.11", features = ["v4", "serde"] }
+rand = "0.8"
 
 # Web3 / EVM
 alloy = { version = "2.4", default-features = false, features = ["reqwest", "provider-http", "rpc-types-eth", "contract", "sol-types", "json-abi"] }

@@ -100,4 +100,51 @@ async fn test_api_health_endpoint() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+
+    // 5. Research Experiments endpoint test
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/research/experiments")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let report_json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(report_json["experiment_id"].is_string());
+    assert!(report_json["verdict"]["data_source"].is_string());
+
+    // 6. Research Copiability endpoint test
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/research/copyability")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 7. Research Markdown Report endpoint test
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/research/report")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let md_bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let md_str = String::from_utf8_lossy(&md_bytes);
+    assert!(md_str.contains("Research Experiment Report"));
+    assert!(md_str.contains("DATA SOURCE"));
 }

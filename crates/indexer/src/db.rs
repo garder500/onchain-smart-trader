@@ -489,6 +489,48 @@ impl Database {
             .collect())
     }
 
+    /// Fetches all recent trades across all wallets for research analysis
+    pub async fn get_all_trades(&self, limit: i64) -> Result<Vec<Trade>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, wallet_address, token_address, side, amount_tokens,
+                   price_usd, volume_usd, fee_usd, tx_hash, block_number, timestamp
+            FROM trades
+            ORDER BY timestamp ASC, block_number ASC
+            LIMIT $1
+            "#,
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                let side_str: String = r.get("side");
+                let side = match side_str.as_str() {
+                    "BUY" => domain::TradeSide::Buy,
+                    _ => domain::TradeSide::Sell,
+                };
+                let block_number: i64 = r.get("block_number");
+
+                Trade {
+                    id: r.get("id"),
+                    wallet_address: WalletAddress::new(r.get::<String, _>("wallet_address")),
+                    token_address: TokenAddress::new(r.get::<String, _>("token_address")),
+                    side,
+                    amount_tokens: r.get("amount_tokens"),
+                    price_usd: r.get("price_usd"),
+                    volume_usd: r.get("volume_usd"),
+                    fee_usd: r.get("fee_usd"),
+                    tx_hash: domain::TxHash::new(r.get::<String, _>("tx_hash")),
+                    block_number: block_number as u64,
+                    timestamp: r.get("timestamp"),
+                }
+            })
+            .collect())
+    }
+
     // --- Wallet Scores ---
     pub async fn save_wallet_score(&self, score: &WalletScore) -> Result<()> {
         let dummy_wallet = Wallet::new(score.wallet_address.clone(), score.evaluated_at);

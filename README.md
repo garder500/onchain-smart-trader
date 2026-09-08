@@ -26,14 +26,16 @@ onchain-smart-trader/
 │   ├── domain/           # Strongly typed financial models (Decimal precision, zero float for money)
 │   ├── chain/            # Alloy EVM RPC client, bytecode inspection & event decoder (Transfer, Swap, Sync)
 │   ├── indexer/          # Idempotent EVM block scanner, checkpointing & PostgreSQL persistence
-│   ├── wallet-profiler/  # Look-ahead free wallet profiling, metrics & profit factor tracking
+│   ├── wallet-profiler/  # Look-ahead free wallet profiling, anti-survivorship rug marking & metrics
 │   ├── token-risk/       # Configurable token risk scoring, honeypot detection & anti-rug rules
 │   ├── strategy/         # Smart wallet copy-trading signals, position sizers & multi-exit rules
 │   ├── paper-trader/     # Simulated order executor, realistic slippage/fees & virtual portfolio
 │   ├── analytics/        # Replay engine, A/B testing suite (4 models) & performance metrics (Sharpe, Drawdown)
+│   ├── research/         # Empirical alpha research lab, latency degradation, scalability & Monte Carlo tests
 │   └── api/              # Axum REST API server & unified CLI binary (`smart-trader`)
 ├── migrations/           # PostgreSQL migration scripts (indexes, foreign keys, unique constraints)
 ├── config/               # Strategy and risk configuration TOML files
+├── docs/                 # Research audit (PHASE2_AUDIT.md) & generated reports (RESEARCH_REPORT.md)
 ├── docker-compose.yml    # PostgreSQL container definition
 ├── .env.example          # Environment variables template
 └── README.md
@@ -179,7 +181,23 @@ Produces the comparative benchmark:
 cargo run -p api -- report --strategy "Smart Wallet Copy"
 ```
 
-### 6. Starting the REST API Server
+### 6. Running Empirical Alpha Research & Validation
+
+Executes full scientific research pipeline including anti-survivorship unclosed rug evaluation, Train/Val/Test split, walk-forward validation, Monte Carlo permutation testing ($p$-value), and bootstrap 95% confidence intervals:
+
+```bash
+cargo run -p api -- research --source synthetic --out docs/RESEARCH_REPORT.md
+```
+
+### 7. Evaluating Copiability & Latency Degradation Matrix
+
+Tests performance across delay bands ($0\text{s}, 1\text{s}, 2\text{s}, 5\text{s}, 10\text{s}, 15\text{s}, 30\text{s}, 60\text{s}, 120\text{s}$):
+
+```bash
+cargo run -p api -- copyability --capital 1000
+```
+
+### 8. Starting the REST API Server
 
 ```bash
 cargo run -p api -- server
@@ -202,6 +220,11 @@ cargo run -p api -- server
 | `GET` | `/performance` | Strategy performance snapshot (Sharpe, ROI, PnL, Drawdown) |
 | `GET` | `/strategies` | List of strategy runs |
 | `GET` | `/strategies/{id}` | Detailed parameters and state of a strategy run |
+| `GET` | `/api/v1/research/experiments` | Run research experiment and return JSON report |
+| `GET` | `/api/v1/research/report` | Return full research report in Markdown format |
+| `GET` | `/api/v1/research/copyability` | Evaluate latency degradation matrix across delays |
+| `GET` | `/api/v1/research/scalability` | Evaluate capital scalability curve against AMM depth |
+| `POST` | `/api/v1/research/run` | Execute custom research experiment from JSON config |
 
 ---
 

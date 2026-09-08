@@ -52,8 +52,9 @@ impl AppConfig {
     pub fn from_env() -> DomainResult<Self> {
         let _ = dotenvy::dotenv();
 
-        let database_url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://postgres:postgres@localhost:5432/trading_bot".into());
+        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://postgres:postgrespassword@localhost:5432/trading_bot".into()
+        });
 
         let rpc_http_url =
             std::env::var("RPC_HTTP_URL").unwrap_or_else(|_| "https://eth.llamarpc.com".into());

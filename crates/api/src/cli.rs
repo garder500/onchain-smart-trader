@@ -54,6 +54,28 @@ pub enum Commands {
         strategy: String,
     },
 
+    /// Run scientific alpha research laboratory & out-of-sample validation
+    Research {
+        /// Data source mode: synthetic | real | mixed
+        #[arg(long, default_value = "synthetic")]
+        source: String,
+
+        /// Format: markdown | json
+        #[arg(long, default_value = "markdown")]
+        format: String,
+
+        /// Output path for report
+        #[arg(long)]
+        out: Option<String>,
+    },
+
+    /// Run latency degradation and copiability matrix analysis
+    Copyability {
+        /// Capital per trade in USD
+        #[arg(long, default_value = "1000")]
+        capital: String,
+    },
+
     /// Launch Axum REST API server
     Server,
 }
