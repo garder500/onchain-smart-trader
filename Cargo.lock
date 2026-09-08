@@ -641,6 +641,7 @@ dependencies = [
  "strategy",
  "thiserror",
  "token-risk",
+ "tokio",
  "tracing",
  "uuid",
  "wallet-profiler",
