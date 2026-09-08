@@ -57,6 +57,11 @@ pub struct ExperimentConfig {
     pub bootstrap_iterations: usize,
     pub permutation_iterations: usize,
     pub data_source: DataSource,
+    pub seed: u64,
+    pub require_real_data: bool,
+    pub random_benchmark_runs: usize,
+    pub initial_cash: Decimal,
+    pub max_open_positions: usize,
 }
 
 impl Default for ExperimentConfig {
@@ -80,7 +85,36 @@ impl Default for ExperimentConfig {
             bootstrap_iterations: 1000,
             permutation_iterations: 500,
             data_source: DataSource::Synthetic,
+            seed: 42,
+            require_real_data: false,
+            random_benchmark_runs: 100,
+            initial_cash: Decimal::from(10000),
+            max_open_positions: 5,
         }
+    }
+}
+
+/// Immutable wrapper guaranteeing parameters are frozen after training/selection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FrozenConfig {
+    config: ExperimentConfig,
+    frozen_at: DateTime<Utc>,
+}
+
+impl FrozenConfig {
+    pub fn freeze(config: ExperimentConfig) -> Self {
+        Self {
+            config,
+            frozen_at: Utc::now(),
+        }
+    }
+
+    pub fn get(&self) -> &ExperimentConfig {
+        &self.config
+    }
+
+    pub fn frozen_at(&self) -> DateTime<Utc> {
+        self.frozen_at
     }
 }
 
@@ -125,16 +159,27 @@ pub struct PerformanceMetrics {
     pub win_rate: Decimal,
     pub loss_rate: Decimal,
     pub gross_pnl: Decimal,
+    pub trading_fees: Decimal,
+    pub gas_fees: Decimal,
+    pub slippage_cost: Decimal,
     pub net_pnl: Decimal,
     pub profit_factor: Decimal,
     pub expectancy: Decimal,
     pub max_drawdown_pct: Decimal,
-    pub sharpe_ratio: Option<Decimal>,
+    /// Explicitly named trade_level_sharpe to prevent confusion with annualized Sharpe
+    pub trade_level_sharpe: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LatencyMode {
+    Empirical,
+    StressTest,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DelayImpactPoint {
     pub delay_seconds: u64,
+    pub mode: LatencyMode,
     pub net_pnl: Decimal,
     pub win_rate: Decimal,
     pub copy_efficiency: Decimal,
@@ -149,22 +194,31 @@ pub struct ScalabilityImpactPoint {
     pub return_pct: Decimal,
     pub avg_price_impact_bps: Decimal,
     pub capacity_exhausted: bool,
+    pub is_real_liquidity: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BootstrapConfidenceInterval {
     pub metric: String,
+    pub unit: String,
     pub mean: Decimal,
+    pub median: Decimal,
     pub ci_lower_95: Decimal,
     pub ci_upper_95: Decimal,
+    pub ci_lower_99: Decimal,
+    pub ci_upper_99: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermutationTestResult {
+    pub unit_of_randomization: String,
     pub observed_sharpe: Decimal,
     pub null_mean_sharpe: Decimal,
+    pub null_median_sharpe: Decimal,
     pub p_value: f64,
     pub is_significant: bool,
+    pub iterations: usize,
+    pub seed: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,7 +226,7 @@ pub struct AblationVariantResult {
     pub variant_name: String,
     pub description: String,
     pub net_pnl: Decimal,
-    pub sharpe: Option<Decimal>,
+    pub trade_level_sharpe: Option<Decimal>,
     pub pnl_delta_pct: Decimal,
 }
 
@@ -183,22 +237,65 @@ pub struct WalkForwardWindow {
     pub train_end: DateTime<Utc>,
     pub test_start: DateTime<Utc>,
     pub test_end: DateTime<Utc>,
+    pub selected_wallets_count: usize,
     pub in_sample_sharpe: Option<Decimal>,
     pub out_of_sample_sharpe: Option<Decimal>,
     pub degradation_pct: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RandomBenchmarkDistribution {
+    pub runs: usize,
+    pub mean_return_pct: Decimal,
+    pub median_return_pct: Decimal,
+    pub std_dev: Decimal,
+    pub p25_return_pct: Decimal,
+    pub p75_return_pct: Decimal,
+    pub ci_lower_95: Decimal,
+    pub ci_upper_95: Decimal,
+    pub mean_win_rate: Decimal,
+    pub mean_trade_sharpe: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BenchmarkComparison {
     pub strategy_name: String,
     pub total_return_pct: Decimal,
-    pub sharpe_ratio: Option<Decimal>,
+    pub trade_level_sharpe: Option<Decimal>,
     pub max_drawdown_pct: Decimal,
     pub win_rate: Decimal,
+    pub random_distribution: Option<RandomBenchmarkDistribution>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum VerdictStatus {
+    NotValidated,
+    InsufficientData,
+    NoStatisticalEdge,
+    EdgeNotCopiable,
+    EdgeUnscalable,
+    PromisingButUnproven,
+    EmpiricallySupported,
+}
+
+impl std::fmt::Display for VerdictStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VerdictStatus::NotValidated => write!(f, "NOT_VALIDATED"),
+            VerdictStatus::InsufficientData => write!(f, "INSUFFICIENT_DATA"),
+            VerdictStatus::NoStatisticalEdge => write!(f, "NO_STATISTICAL_EDGE"),
+            VerdictStatus::EdgeNotCopiable => write!(f, "EDGE_NOT_COPIABLE"),
+            VerdictStatus::EdgeUnscalable => write!(f, "EDGE_UNSCALABLE"),
+            VerdictStatus::PromisingButUnproven => write!(f, "PROMISING_BUT_UNPROVEN"),
+            VerdictStatus::EmpiricallySupported => write!(f, "EMPIRICALLY_SUPPORTED"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScientificVerdict {
+    pub status: VerdictStatus,
     pub data_source: DataSource,
     pub is_alpha_statistically_significant: bool,
     pub is_copiable_under_latency: bool,
@@ -218,6 +315,7 @@ pub struct ExperimentReport {
     pub start_timestamp: DateTime<Utc>,
     pub end_timestamp: DateTime<Utc>,
     pub wallet_classifications: Vec<WalletClassification>,
+    pub train_selected_wallets: Vec<String>,
     pub baseline_metrics: PerformanceMetrics,
     pub delay_curve: Vec<DelayImpactPoint>,
     pub scalability_curve: Vec<ScalabilityImpactPoint>,

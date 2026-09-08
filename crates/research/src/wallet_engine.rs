@@ -3,22 +3,33 @@ use chrono::{DateTime, Duration, Utc};
 use domain::Trade;
 use rust_decimal::prelude::*;
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 use wallet_profiler::MetricsCalculator;
 
 pub struct WalletResearchEngine;
 
 impl WalletResearchEngine {
-    /// Classifies a wallet into a behavioral cluster based on its trading mechanics.
-    pub fn classify_wallet(
+    /// Classifies a wallet as of a specific point in time (anti-look-ahead compliant).
+    /// Strictly filters trades where timestamp <= as_of_timestamp.
+    pub fn classify_wallet_as_of(
         wallet_address: &str,
         trades: &[Trade],
-        eval_timestamp: DateTime<Utc>,
+        as_of_timestamp: DateTime<Utc>,
     ) -> WalletClassification {
-        let metrics = MetricsCalculator::compute_metrics(trades, eval_timestamp, 1800);
+        let valid_trades: Vec<&Trade> = trades
+            .iter()
+            .filter(|t| t.timestamp <= as_of_timestamp)
+            .collect();
+
+        let owned_valid_trades: Vec<Trade> = valid_trades.into_iter().cloned().collect();
+        let metrics =
+            MetricsCalculator::compute_metrics(&owned_valid_trades, as_of_timestamp, 1800);
         let mut reasoning = Vec::new();
 
         let cluster = if metrics.total_trades < 3 {
-            reasoning.push("Insufficient trades for deterministic clustering".into());
+            reasoning.push(
+                "Insufficient trades for deterministic clustering at evaluation timestamp".into(),
+            );
             BehavioralCluster::HighRiskDegen
         } else if metrics.early_entry_ratio >= Decimal::from_str("0.55").unwrap()
             && metrics.average_holding_time_seconds <= 900
@@ -61,7 +72,7 @@ impl WalletResearchEngine {
             BehavioralCluster::MomentumTrader
         };
 
-        // Copiability filter: Snipers, high-frequency bots, and market makers cannot be copied
+        // Copiability filter: Snipers, high-frequency bots, and degens cannot be copied
         let copiable = match cluster {
             BehavioralCluster::EarlySniper => {
                 reasoning.push("UNCOPIABLE: Extreme front-running / sniper disadvantage".into());
@@ -76,12 +87,21 @@ impl WalletResearchEngine {
                 false
             }
             BehavioralCluster::SwingTrader | BehavioralCluster::MomentumTrader => {
-                reasoning.push("POTENTIALLY COPIABLE: Execution horizon permits latency".into());
-                true
+                if metrics.expectancy > Decimal::ZERO {
+                    reasoning.push(
+                        "POTENTIALLY COPIABLE: Positive expectancy and latency-resilient horizon"
+                            .into(),
+                    );
+                    true
+                } else {
+                    reasoning.push("UNCOPIABLE: Non-positive expectancy".into());
+                    false
+                }
             }
         };
 
-        let persistence_score = Self::compute_persistence_score(trades, eval_timestamp);
+        let persistence_score =
+            Self::compute_persistence_score_as_of(&owned_valid_trades, as_of_timestamp);
 
         WalletClassification {
             wallet_address: wallet_address.to_string(),
@@ -92,17 +112,53 @@ impl WalletResearchEngine {
         }
     }
 
-    /// Computes how consistently a wallet maintains positive expectancy across consecutive periods.
-    pub fn compute_persistence_score(trades: &[Trade], eval_timestamp: DateTime<Utc>) -> Decimal {
-        if trades.len() < 4 {
+    /// Selects copiable wallets strictly as of a cutoff timestamp (e.g. at end of TRAIN).
+    pub fn select_copiable_wallets_as_of(
+        all_trades: &[Trade],
+        as_of_timestamp: DateTime<Utc>,
+        min_trades: usize,
+    ) -> Vec<WalletClassification> {
+        let mut wallet_trades: HashMap<String, Vec<Trade>> = HashMap::new();
+        for trade in all_trades {
+            if trade.timestamp <= as_of_timestamp {
+                wallet_trades
+                    .entry(trade.wallet_address.as_str().to_string())
+                    .or_default()
+                    .push(trade.clone());
+            }
+        }
+
+        let mut eligible = Vec::new();
+        for (addr, trades) in wallet_trades {
+            if trades.len() >= min_trades {
+                let classification = Self::classify_wallet_as_of(&addr, &trades, as_of_timestamp);
+                eligible.push(classification);
+            }
+        }
+        eligible.sort_by(|a, b| a.wallet_address.cmp(&b.wallet_address));
+
+        eligible
+    }
+
+    /// Computes how consistently a wallet maintains positive expectancy across consecutive periods strictly <= as_of_timestamp.
+    pub fn compute_persistence_score_as_of(
+        trades: &[Trade],
+        as_of_timestamp: DateTime<Utc>,
+    ) -> Decimal {
+        let valid_trades: Vec<&Trade> = trades
+            .iter()
+            .filter(|t| t.timestamp <= as_of_timestamp)
+            .collect();
+
+        if valid_trades.len() < 4 {
             return Decimal::ZERO;
         }
 
-        let mut sorted_trades = trades.to_vec();
+        let mut sorted_trades: Vec<Trade> = valid_trades.into_iter().cloned().collect();
         sorted_trades.sort_by_key(|t| t.timestamp);
 
         let start_time = sorted_trades.first().unwrap().timestamp;
-        let total_duration = eval_timestamp - start_time;
+        let total_duration = as_of_timestamp - start_time;
         if total_duration.num_days() < 2 {
             return Decimal::from_str("0.5").unwrap();
         }
@@ -116,7 +172,7 @@ impl WalletResearchEngine {
             .collect();
         let t2_trades: Vec<Trade> = sorted_trades
             .iter()
-            .filter(|t| t.timestamp > half_point && t.timestamp <= eval_timestamp)
+            .filter(|t| t.timestamp > half_point && t.timestamp <= as_of_timestamp)
             .cloned()
             .collect();
 
@@ -125,17 +181,16 @@ impl WalletResearchEngine {
         }
 
         let m1 = MetricsCalculator::compute_metrics(&t1_trades, half_point, 1800);
-        let m2 = MetricsCalculator::compute_metrics(&t2_trades, eval_timestamp, 1800);
+        let m2 = MetricsCalculator::compute_metrics(&t2_trades, as_of_timestamp, 1800);
 
-        // Check if positive expectancy in T1 persists into T2
         if m1.expectancy > Decimal::ZERO && m2.expectancy > Decimal::ZERO {
             Decimal::from_str("0.85").unwrap()
         } else if m1.expectancy > Decimal::ZERO && m2.expectancy <= Decimal::ZERO {
-            Decimal::from_str("0.20").unwrap() // Alpha decayed or mean-reverted!
+            Decimal::from_str("0.20").unwrap()
         } else if m1.expectancy <= Decimal::ZERO && m2.expectancy > Decimal::ZERO {
-            Decimal::from_str("0.40").unwrap() // Lucky rebound
+            Decimal::from_str("0.40").unwrap()
         } else {
-            Decimal::from_str("0.05").unwrap() // Consistently negative
+            Decimal::from_str("0.05").unwrap()
         }
     }
 }

@@ -60,6 +60,14 @@ pub enum Commands {
         #[arg(long, default_value = "synthetic")]
         source: String,
 
+        /// Fail with error if real data is absent (strictly prevents accidental synthetic fallback)
+        #[arg(long)]
+        require_real_data: bool,
+
+        /// Deterministic PRNG seed for scientific reproducibility
+        #[arg(long, default_value = "42")]
+        seed: u64,
+
         /// Format: markdown | json
         #[arg(long, default_value = "markdown")]
         format: String,

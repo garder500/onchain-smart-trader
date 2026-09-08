@@ -265,6 +265,8 @@ async fn main() -> Result<()> {
 
         Commands::Research {
             source,
+            require_real_data,
+            seed,
             format,
             out,
         } => {
@@ -274,23 +276,35 @@ async fn main() -> Result<()> {
                 _ => research::DataSource::Synthetic,
             };
 
+            if require_real_data && data_source == research::DataSource::Synthetic {
+                anyhow::bail!("--require-real-data was specified, but --source is set to synthetic. Aborting.");
+            }
+
             let trades = if data_source == research::DataSource::Synthetic {
                 routes::research::generate_synthetic_research_dataset()
             } else if let Some(ref db) = db_opt {
                 let db_trades = db.get_all_trades(5000).await?;
                 if db_trades.is_empty() {
+                    if require_real_data {
+                        anyhow::bail!("--require-real-data was specified, but the database contains 0 historical trades. Aborting.");
+                    }
                     warn!("No live trades found in DB; falling back to synthetic dataset");
                     routes::research::generate_synthetic_research_dataset()
                 } else {
                     db_trades
                 }
             } else {
+                if require_real_data {
+                    anyhow::bail!("--require-real-data was specified, but database connection is unavailable. Aborting.");
+                }
                 warn!("Database connection unavailable; running research on synthetic dataset");
                 routes::research::generate_synthetic_research_dataset()
             };
 
             let exp_config = research::ExperimentConfig {
                 data_source,
+                seed,
+                require_real_data,
                 ..Default::default()
             };
 
@@ -315,8 +329,15 @@ async fn main() -> Result<()> {
             let cap_dec = Decimal::from_str(&capital).unwrap_or_else(|_| Decimal::from(1000));
             let trades = routes::research::generate_synthetic_research_dataset();
             let delays = vec![0, 1, 2, 5, 10, 15, 30, 60, 120];
-            let results =
-                research::CopiabilityEngine::evaluate_latency_matrix(&trades, &delays, cap_dec, 30);
+            let results = research::CopiabilityEngine::evaluate_latency_matrix(
+                &trades,
+                &delays,
+                cap_dec,
+                Decimal::from(10000),
+                5,
+                30,
+                research::LatencyMode::StressTest,
+            );
 
             println!(
                 "================================================================================"

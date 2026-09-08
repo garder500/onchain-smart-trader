@@ -1,4 +1,4 @@
-use crate::types::DelayImpactPoint;
+use crate::types::{DelayImpactPoint, LatencyMode};
 use domain::{Trade, TradeSide};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
@@ -6,22 +6,39 @@ use std::collections::HashMap;
 pub struct CopiabilityEngine;
 
 impl CopiabilityEngine {
-    /// Simulates the impact of execution latency on copy trading returns across a delay spectrum.
+    /// Simulates the impact of execution latency on copy trading returns across a delay spectrum,
+    /// enforcing finite capital budget and open position limits (no infinite cash).
     pub fn evaluate_latency_matrix(
         trades: &[Trade],
         delays: &[u64],
         fixed_capital_per_trade: Decimal,
+        initial_cash: Decimal,
+        max_open_positions: usize,
         fee_bps: i64,
+        latency_mode: LatencyMode,
     ) -> Vec<DelayImpactPoint> {
         let mut results = Vec::new();
 
         // Baseline theoretical pnl at 0s latency
-        let baseline_pnl =
-            Self::simulate_copy_at_delay(trades, 0, fixed_capital_per_trade, fee_bps).0;
+        let baseline_pnl = Self::simulate_copy_at_delay(
+            trades,
+            0,
+            fixed_capital_per_trade,
+            initial_cash,
+            max_open_positions,
+            fee_bps,
+        )
+        .0;
 
         for &delay in delays {
-            let (net_pnl, win_rate, count, slippage_usd) =
-                Self::simulate_copy_at_delay(trades, delay, fixed_capital_per_trade, fee_bps);
+            let (net_pnl, win_rate, count, slippage_usd) = Self::simulate_copy_at_delay(
+                trades,
+                delay,
+                fixed_capital_per_trade,
+                initial_cash,
+                max_open_positions,
+                fee_bps,
+            );
 
             let copy_efficiency = if baseline_pnl > Decimal::ZERO {
                 (net_pnl / baseline_pnl)
@@ -35,6 +52,7 @@ impl CopiabilityEngine {
 
             results.push(DelayImpactPoint {
                 delay_seconds: delay,
+                mode: latency_mode,
                 net_pnl,
                 win_rate,
                 copy_efficiency,
@@ -50,8 +68,11 @@ impl CopiabilityEngine {
         trades: &[Trade],
         delay_seconds: u64,
         capital_per_trade: Decimal,
+        initial_cash: Decimal,
+        max_open_positions: usize,
         fee_bps: i64,
     ) -> (Decimal, Decimal, usize, Decimal) {
+        let mut cash = initial_cash;
         let mut buy_queue: HashMap<String, Vec<(Decimal, Decimal)>> = HashMap::new(); // (entry_price, tokens)
         let mut net_pnl = Decimal::ZERO;
         let mut wins = 0usize;
@@ -74,6 +95,13 @@ impl CopiabilityEngine {
 
             match trade.side {
                 TradeSide::Buy => {
+                    // Check capital constraints: must have enough cash and not exceed max open positions
+                    let current_open_positions: usize =
+                        buy_queue.values().map(|lots| lots.len()).sum();
+                    if cash < capital_per_trade || current_open_positions >= max_open_positions {
+                        continue; // Reject trade due to capital exhaustion
+                    }
+
                     // Entry price degrades higher (worse) due to front-runners
                     let effective_buy_price =
                         trade.price_usd * (Decimal::ONE + adverse_slippage_rate);
@@ -86,6 +114,8 @@ impl CopiabilityEngine {
                     } else {
                         Decimal::ZERO
                     };
+
+                    cash -= capital_per_trade;
 
                     buy_queue
                         .entry(token)
@@ -105,6 +135,7 @@ impl CopiabilityEngine {
                             let fees = (gross_proceeds + cost_basis) * fee_rate;
                             let trade_pnl = gross_proceeds - cost_basis - fees;
 
+                            cash += gross_proceeds - fees;
                             net_pnl += trade_pnl;
                             total_closed += 1;
                             if trade_pnl > Decimal::ZERO {

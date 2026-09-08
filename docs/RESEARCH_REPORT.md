@@ -1,92 +1,96 @@
-# Research Experiment Report: EXP-2026-2AD7A5
+# Research Experiment Report: EXP-2026-C5E163
 
 > [!IMPORTANT]
-> **DATA SOURCE**: `SYNTHETIC`
-> **WARNING**: These results were generated using deterministic/synthetic blockchain test sequences. They do NOT constitute verified on-chain live alpha.
+> **DATA SOURCE**: `SYNTHETIC` | **VERDICT STATUS**: `NOT_VALIDATED`
+> **WARNING**: These results were generated using deterministic/synthetic blockchain test sequences. They do NOT constitute verified on-chain live alpha. Verdict is strictly `NOT_VALIDATED`.
 
 ---
 
 ## 1. Experiment Metadata & Provenance
 
-- **Experiment ID**: `EXP-2026-2AD7A5`
+- **Experiment ID**: `EXP-2026-C5E163`
 - **Git Commit**: `0.1.0`
-- **Dataset Hash**: `66820faf6f9d0ecb`
-- **Evaluation Timestamp**: `2026-09-08 01:54:35.413093490 UTC`
-- **Time Window**: `2026-08-09 01:54:35.412988893 UTC -> 2026-09-06 13:54:35.412988893 UTC`
+- **Dataset SHA-256**: `ba60524f5a4e45b9823508975a31ab83b5d9dd1802105d23ea77f56e64a4663a`
+- **Evaluation Timestamp**: `2026-09-08 02:08:35.873924202 UTC`
+- **Time Window**: `2026-08-09 02:08:35.873754264 UTC -> 2026-09-06 14:08:35.873754264 UTC`
 - **Total Trades Evaluated**: `50`
+- **Train-Selected Wallets Count**: `2`
 
 ## 2. Scientific Verdict & Executive Summary
 
-> **Conclusion**: Statistical test failed: the observed alpha is indistinguishable from random luck (p >= 0.05). Copy-trading this wallet set has NO statistically proven edge.
+> **Verdict Status**: `NOT_VALIDATED`
+> **Conclusion**: NOT VALIDATED: Results are based on synthetic data and serve only to test engine functionality. No statistical alpha can be inferred.
 
 | Hypothesis / Condition | Result | Assessment |
 |---|---|---|
 | Statistical Significance ($p < 0.05$) | `false` | FAIL (Luck / Noise) |
 | Latency Copiability ($d \ge 2\text{s}$) | `true` | PASS (Robust) |
-| Max Scalable Capital | `$10000` | Viable for Micro-Capital |
+| Max Scalable Capital | `$5000` | Viable for Micro-Capital |
 | Break-Even Latency | `N/A` | Profitable across tested latency bands |
 
 ## 3. Wallet Behavioral Taxonomy & Persistence
 
-| Wallet Address | Cluster | Persistence Score | Copiable? | Notes |
-|---|---|---|---|---|
-| `0x1111111111111111111111111111111111111111` | `MOMENTUM_TRADER` | `0.85` | Yes | Momentum trader: intraday trend following; POTENTIALLY COPIABLE: Execution horizon permits latency |
-| `0x2222222222222222222222222222222222222222` | `SWING_TRADER` | `0.85` | Yes | Swing trader: long holding time of 48.0 hours; POTENTIALLY COPIABLE: Execution horizon permits latency |
+| Wallet Address | Cluster | Persistence Score | Copiable? | Selected in Train? | Notes |
+|---|---|---|---|---|---|
+| `0x2222222222222222222222222222222222222222` | `SWING_TRADER` | `0.85` | Yes | **YES** | Swing trader: long holding time of 48.0 hours; POTENTIALLY COPIABLE: Positive expectancy and latency-resilient horizon |
+| `0x1111111111111111111111111111111111111111` | `MOMENTUM_TRADER` | `0.85` | Yes | **YES** | Momentum trader: intraday trend following; POTENTIALLY COPIABLE: Positive expectancy and latency-resilient horizon |
 
 ## 4. Latency Degradation Curve (Copiability Engine)
 
-| Delay (s) | Realized Net PnL ($) | Win Rate | Copy Efficiency | Trades | Slippage USD |
-|---|---|---|---|---|---|
-| `0s` | `$17796.00` | `60.0%` | `1.00x` | `25` | `$0.00` |
-| `1s` | `$17031.20` | `60.0%` | `0.95x` | `25` | `$222.99` |
-| `2s` | `$16753.04` | `60.0%` | `0.94x` | `25` | `$304.09` |
-| `5s` | `$16206.48` | `60.0%` | `0.91x` | `25` | `$463.45` |
-| `10s` | `$15598.91` | `60.0%` | `0.87x` | `25` | `$640.60` |
-| `15s` | `$15138.63` | `60.0%` | `0.85x` | `25` | `$774.81` |
-| `30s` | `$14118.06` | `60.0%` | `0.79x` | `25` | `$1072.38` |
-| `60s` | `$12716.84` | `60.0%` | `0.71x` | `25` | `$1480.94` |
-| `120s` | `$10814.97` | `60.0%` | `0.60x` | `25` | `$2035.47` |
+| Delay (s) | Mode | Realized Net PnL ($) | Win Rate | Copy Efficiency | Trades | Slippage USD |
+|---|---|---|---|---|---|---|
+| `0s` | `StressTest` | `$2518.35` | `75.0%` | `1.00x` | `4` | `$0.00` |
+| `1s` | `StressTest` | `$2401.85` | `75.0%` | `0.95x` | `4` | `$35.67` |
+| `2s` | `StressTest` | `$2359.48` | `75.0%` | `0.93x` | `4` | `$48.65` |
+| `5s` | `StressTest` | `$2276.22` | `75.0%` | `0.90x` | `4` | `$74.15` |
+| `10s` | `StressTest` | `$2183.67` | `75.0%` | `0.86x` | `4` | `$102.49` |
+| `15s` | `StressTest` | `$2113.56` | `75.0%` | `0.83x` | `4` | `$123.97` |
+| `30s` | `StressTest` | `$1958.10` | `75.0%` | `0.77x` | `4` | `$171.58` |
+| `60s` | `StressTest` | `$1744.66` | `75.0%` | `0.69x` | `4` | `$236.95` |
+| `120s` | `StressTest` | `$1454.96` | `75.0%` | `0.57x` | `4` | `$325.67` |
 
 ## 5. Capital Scalability Curve (Liquidity Impact)
 
-| Capital ($) | Net PnL ($) | Return (%) | Price Impact (bps) | Capacity Status |
-|---|---|---|---|---|
-| `$100` | `$1771.04` | `70.84%` | `9.9 bps` | OK |
-| `$500` | `$8685.76` | `69.48%` | `49.7 bps` | OK |
-| `$1000` | `$16955.39` | `67.82%` | `99.0 bps` | OK |
-| `$5000` | `$69493.18` | `55.59%` | `476.1 bps` | OK |
-| `$10000` | `$106508.33` | `42.60%` | `909.0 bps` | OK |
-| `$50000` | `$-181974.99` | `-14.55%` | `3333.3 bps` | EXHAUSTED |
-| `$100000` | `$-1078466.66` | `-43.13%` | `5000.0 bps` | EXHAUSTED |
-
-## 6. Out-Of-Sample Validation (Anti-Look-Ahead)
-
-| Data Partition | Trades | Win Rate | Net PnL ($) | Expectancy ($) | Sharpe Ratio |
+| Capital ($) | Net PnL ($) | Return (%) | Price Impact (bps) | Real Liquidity? | Capacity Status |
 |---|---|---|---|---|---|
-| Train (60%) | `21` | `71.4%` | `$6795.00` | `$323.57` | `0.81` |
-| Validation (20%) | `8` | `50.0%` | `$1266.00` | `$158.25` | `0.49` |
-| Test / OOS (20%) | `5` | `80.0%` | `$1872.00` | `$374.40` | `0.82` |
+| `$100` | `$250.53` | `62.63%` | `9.9 bps` | `false` | OK |
+| `$500` | `$1226.84` | `61.34%` | `49.7 bps` | `false` | OK |
+| `$1000` | `$2390.30` | `59.75%` | `99.0 bps` | `false` | OK |
+| `$5000` | `$9623.40` | `48.11%` | `476.1 bps` | `false` | OK |
+| `$10000` | `$-3798.75` | `-37.98%` | `909.0 bps` | `false` | EXHAUSTED |
+| `$50000` | `$0.00` | `0.00%` | `3333.3 bps` | `false` | EXHAUSTED |
+| `$100000` | `$0.00` | `0.00%` | `5000.0 bps` | `false` | EXHAUSTED |
+
+## 6. Out-Of-Sample Validation (Anti-Look-Ahead Split)
+
+| Data Partition | Trades | Gross PnL ($) | Fees ($) | Net PnL ($) | Win Rate | Expectancy ($) | Trade Sharpe |
+|---|---|---|---|---|---|---|---|
+| Train (60%) | `21` | `$6900.00` | `$105.00` | `$6795.00` | `71.4%` | `$323.57` | `0.81` |
+| Validation (20%) | `8` | `$1300.00` | `$34.00` | `$1266.00` | `50.0%` | `$158.25` | `0.49` |
+| Test / Blind OOS (20%) | `5` | `$1908.00` | `$36.00` | `$1872.00` | `80.0%` | `$374.40` | `0.82` |
 
 ## 7. Statistical Rigor: Permutation Testing & Bootstrap CIs
 
-- **Observed Sharpe**: `0.82`
-- **Null Hypothesis Mean Sharpe ($H_0$)**: `0.74`
-- **Empirical $p$-value**: `0.1600` (NOT Statistically Significant)
+- **Unit of Randomization**: `WALLET`
+- **Observed Trade Sharpe**: `0.82`
+- **Null Mean Sharpe ($H_0$)**: `0.06`
+- **Null Median Sharpe**: `0.17`
+- **Empirical $p$-value**: `0.0600` (NOT Statistically Significant)
 
-### Bootstrap 95% Confidence Intervals (1,000 resamples)
+### Bootstrap Confidence Intervals (Resampled by Wallet)
 
-| Metric | Sample Mean | 95% CI Lower | 95% CI Upper |
-|---|---|---|---|
-| Win Rate | `0.65` | `0.00` | `1.00` |
-| Expectancy ($) | `318.40` | `-3.00` | `784.90` |
-| Sharpe Ratio | `0.85` | `0.09` | `1.56` |
+| Metric | Unit | Mean | Median | 95% CI Lower | 95% CI Upper | 99% CI Lower | 99% CI Upper |
+|---|---|---|---|---|---|---|---|
+| Win Rate | % | `0.90` | `1.00` | `0.80` | `1.00` | `0.80` | `1.00` |
+| Expectancy ($) | USD | `407.51` | `393.00` | `374.40` | `493.00` | `374.40` | `493.00` |
+| Trade-Level Sharpe Ratio | ratio | `0.82` | `0.82` | `0.82` | `0.82` | `0.82` | `0.82` |
 
 ## 8. Benchmark Comparisons
 
-| Strategy | Total Return (%) | Sharpe Ratio | Max Drawdown (%) | Win Rate |
-|---|---|---|---|---|
-| SmartWalletCopy (Filtered) | `113.25%` | `0.82` | `2.2%` | `71.4%` |
-| NaiveCopy (Unfiltered All Wallets) | `113.25%` | `0.82` | `2.2%` | `71.4%` |
-| RandomSelection (Random 33% Sample) | `30.45%` | `0.62` | `7.1%` | `58.3%` |
-| Buy & Hold (Baseline Benchmark) | `5.00%` | `0.85` | `12.0%` | `50.0%` |
+| Strategy | Total Return (%) | Trade Sharpe | Max Drawdown (%) | Win Rate | Monte Carlo Detail |
+|---|---|---|---|---|---|
+| SmartWalletCopy (Filtered OOS) | `18.72%` | `0.82` | `13.6%` | `80.0%` | - |
+| NaiveCopy (Unfiltered All Wallets) | `18.72%` | `0.82` | `13.6%` | `80.0%` | - |
+| RandomSelection (Monte Carlo N=100) | `9.68%` | `N/A` | `0.0%` | `100.0%` | Mean: 9.68%, StdDev: 5.42%, 95% CI: [3.93%, 14.79%] |
+| Buy & Hold (Empirical Market Basket) | `0.00%` | `N/A` | `0.0%` | `0.0%` | - |
 

@@ -7,11 +7,14 @@ use std::collections::HashMap;
 pub struct ScalabilityEngine;
 
 impl ScalabilityEngine {
-    /// Evaluates returns across varying capital allocations using constant-product AMM impact.
+    /// Evaluates returns across varying capital allocations using constant-product AMM impact,
+    /// explicitly tracking whether liquidity data is empirical or synthetic.
     pub fn evaluate_scalability(
         trades: &[Trade],
         capitals: &[Decimal],
         assumed_pool_liquidity: Decimal,
+        is_real_liquidity: bool,
+        initial_cash: Decimal,
         fee_bps: i64,
     ) -> Vec<ScalabilityImpactPoint> {
         let mut points = Vec::new();
@@ -27,6 +30,7 @@ impl ScalabilityEngine {
 
             let impact_bps = impact_rate * Decimal::from(10000);
 
+            let mut cash = initial_cash;
             let mut buy_queue: HashMap<String, Vec<(Decimal, Decimal)>> = HashMap::new();
             let mut total_net_pnl = Decimal::ZERO;
             let mut total_capital_deployed = Decimal::ZERO;
@@ -36,12 +40,17 @@ impl ScalabilityEngine {
 
                 match trade.side {
                     TradeSide::Buy => {
+                        if cash < capital {
+                            continue; // Rejection due to capital constraint
+                        }
+
                         let executed_price = trade.price_usd * (Decimal::ONE + impact_rate);
                         let tokens = if executed_price > Decimal::ZERO {
                             capital / executed_price
                         } else {
                             Decimal::ZERO
                         };
+                        cash -= capital;
                         total_capital_deployed += capital;
                         buy_queue
                             .entry(token)
@@ -56,6 +65,7 @@ impl ScalabilityEngine {
                                 let proceeds = executed_price * tokens;
                                 let cost = entry_price * tokens;
                                 let fees = (proceeds + cost) * fee_rate;
+                                cash += proceeds - fees;
                                 total_net_pnl += proceeds - cost - fees;
                             }
                         }
@@ -77,6 +87,7 @@ impl ScalabilityEngine {
                 return_pct,
                 avg_price_impact_bps: impact_bps,
                 capacity_exhausted,
+                is_real_liquidity,
             });
         }
 

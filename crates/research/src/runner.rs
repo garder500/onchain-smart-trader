@@ -1,18 +1,27 @@
 use crate::benchmarks::BenchmarkEngine;
 use crate::copiability::CopiabilityEngine;
 use crate::scalability::ScalabilityEngine;
-use crate::types::{ExperimentConfig, ExperimentId, ExperimentReport, ScientificVerdict};
+use crate::types::{
+    DataSource, ExperimentConfig, ExperimentId, ExperimentReport, LatencyMode, ScientificVerdict,
+    VerdictStatus,
+};
 use crate::validation::ScientificValidator;
 use crate::wallet_engine::WalletResearchEngine;
 use chrono::Utc;
 use domain::Trade;
 use rust_decimal::Decimal;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 
 pub struct ResearchRunner;
 
 impl ResearchRunner {
     /// Executes a full scientific research experiment across all empirical dimensions.
+    /// Strictly enforces:
+    /// 1. Real cryptographic SHA-256 hash across all trade attributes.
+    /// 2. Anti-look-ahead wallet selection: Wallets are selected ONLY from Train partition (trades <= T_train).
+    /// 3. Blind out-of-sample evaluation: Copied wallets' trades occurring > T_train are evaluated blindly.
+    /// 4. Strict data segregation: Synthetic data is ALWAYS flagged VerdictStatus::NotValidated.
     pub fn run_experiment(
         trades: &[Trade],
         config: &ExperimentConfig,
@@ -33,48 +42,120 @@ impl ResearchRunner {
             .map(|t| t.timestamp)
             .unwrap_or(created_at);
 
-        // Compute dataset hash
-        let dataset_str = format!("{}_{}_{}", trades.len(), start_timestamp, end_timestamp);
-        let dataset_hash = format!("{:x}", md5_like_hash(&dataset_str));
-
-        // 1. Group trades by wallet
-        let mut wallet_trades: HashMap<String, Vec<Trade>> = HashMap::new();
-        for trade in &sorted_trades {
-            let addr = trade.wallet_address.as_str().to_string();
-            wallet_trades.entry(addr).or_default().push(trade.clone());
+        // 1. Cryptographic SHA-256 Dataset Hash
+        let mut hasher = Sha256::new();
+        for t in &sorted_trades {
+            hasher.update(t.id.to_string().as_bytes());
+            hasher.update(t.wallet_address.as_str().as_bytes());
+            hasher.update(t.token_address.as_str().as_bytes());
+            hasher.update(t.side.to_string().as_bytes());
+            hasher.update(t.amount_tokens.to_string().as_bytes());
+            hasher.update(t.price_usd.to_string().as_bytes());
+            hasher.update(t.timestamp.timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
+            hasher.update(t.fee_usd.to_string().as_bytes());
         }
+        let dataset_hash = format!("{:x}", hasher.finalize());
 
-        // 2. Wallet behavioral classification & filtering
+        // 2. Strict Chronological Split on ALL Trades (Train, Val, Test)
+        let (train_all, val_all, test_all) = ScientificValidator::chronological_split(
+            &sorted_trades,
+            config.train_ratio,
+            config.val_ratio,
+        );
+
+        let train_end_timestamp = train_all
+            .last()
+            .map(|t| t.timestamp)
+            .unwrap_or(start_timestamp);
+
+        // 3. Anti-Look-Ahead Wallet Selection:
+        // Wallets are classified and selected ONLY on trades occurring in Train (<= train_end_timestamp)
+        let selected_classifications = WalletResearchEngine::select_copiable_wallets_as_of(
+            &train_all,
+            train_end_timestamp,
+            config.min_wallet_trades,
+        );
+
+        let train_selected_wallets: Vec<String> = selected_classifications
+            .iter()
+            .filter(|w| {
+                w.copiable && w.persistence_score >= config.min_wallet_score / Decimal::from(100)
+            })
+            .map(|w| w.wallet_address.clone())
+            .collect();
+
+        let selected_wallet_set: HashSet<String> = train_selected_wallets.iter().cloned().collect();
+
+        // Also compile all classifications across the dataset for reporting taxonomy
+        let mut all_wallet_trades: HashMap<String, Vec<Trade>> = HashMap::new();
+        for trade in &sorted_trades {
+            all_wallet_trades
+                .entry(trade.wallet_address.as_str().to_string())
+                .or_default()
+                .push(trade.clone());
+        }
         let mut wallet_classifications = Vec::new();
-        let mut copiable_wallet_addrs = HashSet::new();
-
-        for (addr, w_trades) in &wallet_trades {
+        for (addr, w_trades) in &all_wallet_trades {
             let classification =
-                WalletResearchEngine::classify_wallet(addr, w_trades, end_timestamp);
-            if classification.copiable {
-                copiable_wallet_addrs.insert(addr.clone());
-            }
+                WalletResearchEngine::classify_wallet_as_of(addr, w_trades, end_timestamp);
             wallet_classifications.push(classification);
         }
 
-        // Filter trades belonging to copiable wallets
-        let copiable_trades: Vec<Trade> = sorted_trades
+        // 4. Blind Execution on Partitions:
+        // Filter trades of the FROZEN selected wallets in each chronological partition
+        let train_trades: Vec<Trade> = train_all
             .iter()
-            .filter(|t| copiable_wallet_addrs.contains(t.wallet_address.as_str()))
+            .filter(|t| selected_wallet_set.contains(t.wallet_address.as_str()))
+            .cloned()
+            .collect();
+        let val_trades: Vec<Trade> = val_all
+            .iter()
+            .filter(|t| selected_wallet_set.contains(t.wallet_address.as_str()))
+            .cloned()
+            .collect();
+        let test_trades: Vec<Trade> = test_all
+            .iter()
+            .filter(|t| selected_wallet_set.contains(t.wallet_address.as_str()))
             .cloned()
             .collect();
 
-        // 3. Baseline metrics
-        let baseline_metrics = ScientificValidator::evaluate_slice(&copiable_trades);
+        let train_metrics = ScientificValidator::evaluate_slice(&train_trades);
+        let val_metrics = ScientificValidator::evaluate_slice(&val_trades);
+        let test_metrics = ScientificValidator::evaluate_slice(&test_trades);
 
-        // 4. Copiability Engine: Latency Degradation Curve
+        // Copiable trades across the entire period based strictly on Train selection
+        let all_copiable_trades: Vec<Trade> = sorted_trades
+            .iter()
+            .filter(|t| selected_wallet_set.contains(t.wallet_address.as_str()))
+            .cloned()
+            .collect();
+
+        let baseline_metrics = ScientificValidator::evaluate_slice(&all_copiable_trades);
+
+        // 5. Copiability Engine: Latency Degradation Curve (Evaluated on Test / OOS trades)
+        let eval_copiable_trades = if !test_trades.is_empty() {
+            &test_trades
+        } else if !all_copiable_trades.is_empty() {
+            &all_copiable_trades
+        } else {
+            &sorted_trades
+        };
+
         let fixed_capital_per_trade = Decimal::from(1000);
         let fee_bps = 30; // 0.30% DEX fee
+        let latency_mode = match config.data_source {
+            DataSource::Real => LatencyMode::Empirical,
+            _ => LatencyMode::StressTest,
+        };
+
         let delay_curve = CopiabilityEngine::evaluate_latency_matrix(
-            &copiable_trades,
+            eval_copiable_trades,
             &config.delays_seconds,
             fixed_capital_per_trade,
+            config.initial_cash,
+            config.max_open_positions,
             fee_bps,
+            latency_mode,
         );
 
         // Find break-even latency
@@ -86,72 +167,123 @@ impl ResearchRunner {
             }
         }
 
-        // 5. Scalability Engine: Capital Impact Curve
-        let assumed_pool_liquidity = Decimal::from(100_000); // $100k pool liquidity baseline
+        // 6. Scalability Engine: Capital Impact Curve
+        let assumed_pool_liquidity = Decimal::from(100_000);
+        let is_real_liquidity = config.data_source == DataSource::Real;
         let scalability_curve = ScalabilityEngine::evaluate_scalability(
-            &copiable_trades,
+            eval_copiable_trades,
             &config.capitals_usd,
             assumed_pool_liquidity,
+            is_real_liquidity,
+            config.initial_cash,
             fee_bps,
         );
         let max_scalable_capital =
             ScalabilityEngine::compute_maximum_scalable_capital(&scalability_curve);
 
-        // 6. Chronological Out-Of-Sample Splitting (Anti-Look-Ahead)
-        let (train_trades, val_trades, test_trades) = ScientificValidator::chronological_split(
-            &copiable_trades,
-            config.train_ratio,
-            config.val_ratio,
-        );
-
-        let train_metrics = ScientificValidator::evaluate_slice(&train_trades);
-        let val_metrics = ScientificValidator::evaluate_slice(&val_trades);
-        let test_metrics = ScientificValidator::evaluate_slice(&test_trades);
-
         // 7. Walk-Forward Cross-Validation
-        let walk_forward_windows = ScientificValidator::walk_forward_analysis(&copiable_trades, 3);
+        let walk_forward_windows =
+            ScientificValidator::walk_forward_analysis(&sorted_trades, 3, config.min_wallet_trades);
 
         // 8. Ablation Study
-        let ablation_results = ScientificValidator::ablation_study(&copiable_trades);
-
-        // 9. Permutation Testing (H0 Null Hypothesis)
-        let permutation_test =
-            ScientificValidator::permutation_test(&copiable_trades, config.permutation_iterations);
-
-        // 10. Bootstrap 95% Confidence Intervals
-        let bootstrap_ci = ScientificValidator::bootstrap_confidence_intervals(
-            &copiable_trades,
-            config.bootstrap_iterations,
+        let ablation_results = ScientificValidator::ablation_study(
+            &sorted_trades,
+            &all_copiable_trades,
+            train_end_timestamp,
         );
 
-        // 11. Benchmark Comparisons
-        let benchmark_comparisons =
-            BenchmarkEngine::evaluate_benchmarks(&copiable_trades, &sorted_trades);
+        // 9. Permutation Testing (H0 Null Hypothesis) with Seeded PRNG
+        let permutation_test = ScientificValidator::permutation_test(
+            eval_copiable_trades,
+            config.permutation_iterations,
+            config.seed,
+        );
 
-        // 12. Synthesize Scientific Verdict
+        // 10. Bootstrap 95% Confidence Intervals with Seeded PRNG
+        let bootstrap_ci = ScientificValidator::bootstrap_confidence_intervals(
+            eval_copiable_trades,
+            config.bootstrap_iterations,
+            config.seed,
+        );
+
+        // 11. Empirical Benchmark Comparisons
+        let benchmark_comparisons = BenchmarkEngine::evaluate_benchmarks(
+            eval_copiable_trades,
+            if !test_all.is_empty() {
+                &test_all
+            } else {
+                &sorted_trades
+            },
+            config.initial_cash,
+            config.random_benchmark_runs,
+            config.seed,
+        );
+
+        // 12. Synthesize Scientific Verdict with Strict Data Source Segregation
         let is_copiable_under_latency = delay_curve
             .iter()
             .find(|p| p.delay_seconds == 2)
             .map(|p| p.net_pnl > Decimal::ZERO)
             .unwrap_or(false);
 
-        let conclusion = if !permutation_test.is_significant {
-            "Statistical test failed: the observed alpha is indistinguishable from random luck (p >= 0.05). Copy-trading this wallet set has NO statistically proven edge.".to_string()
-        } else if !is_copiable_under_latency {
-            format!(
-                "Alpha is statistically significant on paper at 0s, but is ENTIRELY DESTROYED by realistic execution latency. Break-even delay is {}s. Copy-trading is an operational illusion.",
-                break_even_latency.unwrap_or(1)
-            )
-        } else if max_scalable_capital < Decimal::from(1000) {
-            "Statistically valid and resilient to low latency, but unscalable: price impact erodes edge above micro-capital ($1,000).".to_string()
-        } else {
-            format!(
-                "Statistically significant edge confirmed (p={:.4}). Resilient up to latency limits with capacity viable up to ${}.",
-                permutation_test.p_value, max_scalable_capital
-            )
+        let verdict_status = match config.data_source {
+            DataSource::Synthetic => VerdictStatus::NotValidated,
+            DataSource::Mixed => {
+                if trades.len() < 30 {
+                    VerdictStatus::InsufficientData
+                } else {
+                    VerdictStatus::PromisingButUnproven
+                }
+            }
+            DataSource::Real => {
+                if trades.len() < 50 {
+                    VerdictStatus::InsufficientData
+                } else if !permutation_test.is_significant {
+                    VerdictStatus::NoStatisticalEdge
+                } else if !is_copiable_under_latency {
+                    VerdictStatus::EdgeNotCopiable
+                } else if max_scalable_capital < Decimal::from(1000) {
+                    VerdictStatus::EdgeUnscalable
+                } else {
+                    VerdictStatus::EmpiricallySupported
+                }
+            }
+        };
+
+        let conclusion = match verdict_status {
+            VerdictStatus::NotValidated => {
+                "NOT VALIDATED: Results are based on synthetic data and serve only to test engine functionality. No statistical alpha can be inferred.".to_string()
+            }
+            VerdictStatus::InsufficientData => {
+                format!("INSUFFICIENT DATA: Dataset contains only {} trades, below scientific statistical power requirements.", trades.len())
+            }
+            VerdictStatus::NoStatisticalEdge => {
+                format!("NO STATISTICAL EDGE: Observed performance failed permutation testing (p={:.4} >= 0.05). Alpha is indistinguishable from luck.", permutation_test.p_value)
+            }
+            VerdictStatus::EdgeNotCopiable => {
+                format!(
+                    "EDGE NOT COPIABLE: Alpha exists in theoretical zero-latency terms but is eliminated under realistic latency (break-even: {}s).",
+                    break_even_latency.unwrap_or(1)
+                )
+            }
+            VerdictStatus::EdgeUnscalable => {
+                format!("EDGE UNSCALABLE: Alpha survives latency but is exhausted at capital allocations above ${}.", max_scalable_capital)
+            }
+            VerdictStatus::PromisingButUnproven => {
+                "PROMISING BUT UNPROVEN: Positive signals observed on mixed dataset, but full empirical validation on unadulterated real on-chain data is required.".to_string()
+            }
+            VerdictStatus::EmpiricallySupported => {
+                format!(
+                    "EMPIRICALLY SUPPORTED: Statistically significant alpha (p={:.4}) resilient to realistic execution latency (break-even {}s) and scalable to ${}.",
+                    permutation_test.p_value,
+                    break_even_latency.map(|d| d.to_string()).unwrap_or_else(|| ">120".into()),
+                    max_scalable_capital
+                )
+            }
         };
 
         let verdict = ScientificVerdict {
+            status: verdict_status,
             data_source: config.data_source,
             is_alpha_statistically_significant: permutation_test.is_significant,
             is_copiable_under_latency,
@@ -170,6 +302,7 @@ impl ResearchRunner {
             start_timestamp,
             end_timestamp,
             wallet_classifications,
+            train_selected_wallets,
             baseline_metrics,
             delay_curve,
             scalability_curve,
@@ -184,13 +317,4 @@ impl ResearchRunner {
             verdict,
         }
     }
-}
-
-fn md5_like_hash(input: &str) -> u64 {
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in input.bytes() {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    h
 }

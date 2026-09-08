@@ -91,11 +91,22 @@ pub async fn get_copyability(
     Query(query): Query<ResearchQuery>,
 ) -> Result<Json<Vec<research::DelayImpactPoint>>, StatusCode> {
     let limit = query.limit.unwrap_or(1000);
-    let (trades, _) = fetch_or_synthesize_trades(&state, limit).await;
+    let (trades, data_source) = fetch_or_synthesize_trades(&state, limit).await;
 
     let delays = vec![0, 1, 2, 5, 10, 15, 30, 60, 120];
-    let results =
-        CopiabilityEngine::evaluate_latency_matrix(&trades, &delays, Decimal::from(1000), 30);
+    let mode = match data_source {
+        research::DataSource::Real => research::LatencyMode::Empirical,
+        _ => research::LatencyMode::StressTest,
+    };
+    let results = CopiabilityEngine::evaluate_latency_matrix(
+        &trades,
+        &delays,
+        Decimal::from(1000),
+        Decimal::from(10000),
+        5,
+        30,
+        mode,
+    );
 
     Ok(Json(results))
 }
@@ -105,7 +116,7 @@ pub async fn get_scalability(
     Query(query): Query<ResearchQuery>,
 ) -> Result<Json<Vec<research::ScalabilityImpactPoint>>, StatusCode> {
     let limit = query.limit.unwrap_or(1000);
-    let (trades, _) = fetch_or_synthesize_trades(&state, limit).await;
+    let (trades, data_source) = fetch_or_synthesize_trades(&state, limit).await;
 
     let capitals = vec![
         Decimal::from(100),
@@ -117,8 +128,15 @@ pub async fn get_scalability(
         Decimal::from(100000),
     ];
 
-    let results =
-        ScalabilityEngine::evaluate_scalability(&trades, &capitals, Decimal::from(100_000), 30);
+    let is_real = data_source == research::DataSource::Real;
+    let results = ScalabilityEngine::evaluate_scalability(
+        &trades,
+        &capitals,
+        Decimal::from(100_000),
+        is_real,
+        Decimal::from(10000),
+        30,
+    );
 
     Ok(Json(results))
 }
