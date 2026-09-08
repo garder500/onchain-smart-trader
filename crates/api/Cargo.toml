@@ -1,0 +1,37 @@
+[package]
+name = "api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "smart-trader"
+path = "src/main.rs"
+
+[dependencies]
+domain = { workspace = true }
+chain = { workspace = true }
+indexer = { workspace = true }
+wallet-profiler = { workspace = true }
+token-risk = { workspace = true }
+strategy = { workspace = true }
+paper-trader = { workspace = true }
+analytics = { workspace = true }
+
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+clap = { workspace = true }
+dotenvy = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

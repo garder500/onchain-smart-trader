@@ -1,0 +1,19 @@
+[package]
+name = "chain"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+domain = { workspace = true }
+alloy = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+rust_decimal = { workspace = true }
+chrono = { workspace = true }
