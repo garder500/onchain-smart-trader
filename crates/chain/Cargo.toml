@@ -17,3 +17,4 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 rust_decimal = { workspace = true }
 chrono = { workspace = true }
+hex = "0.4"

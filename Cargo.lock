@@ -1361,6 +1361,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "domain",
+ "hex",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -2592,6 +2593,7 @@ dependencies = [
 name = "indexer"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "anyhow",
  "async-trait",
  "chain",
