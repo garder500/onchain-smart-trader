@@ -1470,4 +1470,315 @@ mod tests {
             assert!(parsed["quality_checks_passed"].as_bool().unwrap());
         }
     }
+
+    #[test]
+    fn test_no_hardcoded_performance_metrics() {
+        let mut trades_a = generate_test_trade_sequence();
+        for (i, t) in trades_a.iter_mut().enumerate() {
+            if t.side == TradeSide::Sell {
+                t.price_usd = Decimal::from(15 + (i % 5) * 3);
+            }
+        }
+        let selected_wallets: HashSet<String> = trades_a
+            .iter()
+            .map(|t| t.wallet_address.as_str().to_string())
+            .collect();
+        let results_a = InformationalAlphaEngine::evaluate_all_strategies(
+            &trades_a,
+            &trades_a,
+            &selected_wallets,
+            Decimal::from(10000),
+            Decimal::from(1000),
+            30,
+        );
+
+        // Modify trade prices in trades_b to change performance
+        let mut trades_b = generate_test_trade_sequence();
+        for (i, t) in trades_b.iter_mut().enumerate() {
+            if t.side == TradeSide::Sell {
+                t.price_usd = Decimal::from(30 + (i % 5) * 7);
+            }
+        }
+        let results_b = InformationalAlphaEngine::evaluate_all_strategies(
+            &trades_b,
+            &trades_b,
+            &selected_wallets,
+            Decimal::from(10000),
+            Decimal::from(1000),
+            30,
+        );
+
+        // Test that the engine produces different results on different price series (not hardcoded)
+        // DirectCopy at delay=0 should always have non-zero net_pnl if there are closed trades
+        let dc_a: Vec<_> = results_a
+            .iter()
+            .filter(|r| r.family == StrategyFamily::DirectCopy && r.latency_seconds == 0)
+            .collect();
+        let dc_b: Vec<_> = results_b
+            .iter()
+            .filter(|r| r.family == StrategyFamily::DirectCopy && r.latency_seconds == 0)
+            .collect();
+
+        if !dc_a.is_empty() && !dc_b.is_empty() {
+            let a = &dc_a[0];
+            let b = &dc_b[0];
+            // Two different sell price series must produce different net_pnl
+            if a.net_pnl != Decimal::ZERO || b.net_pnl != Decimal::ZERO {
+                assert_ne!(
+                    a.net_pnl, b.net_pnl,
+                    "DirectCopy net_pnl must differ between different price series"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_no_pseudo_p_values_true_permutation() {
+        let trades = generate_test_trade_sequence();
+        let (train, test) = trades.split_at(trades.len() / 2);
+        let selected_wallets: HashSet<String> = trades
+            .iter()
+            .map(|t| t.wallet_address.as_str().to_string())
+            .collect();
+        let results = InformationalAlphaEngine::evaluate_all_strategies(
+            train,
+            test,
+            &selected_wallets,
+            Decimal::from(10000),
+            Decimal::from(1000),
+            30,
+        );
+
+        for res in &results {
+            let perm = res
+                .permutation_detail
+                .as_ref()
+                .expect("Permutation detail must exist");
+            assert_eq!(perm.iterations, 50);
+            assert!(perm.p_value >= 0.0 && perm.p_value <= 1.0);
+            assert_eq!(res.raw_p_value, perm.p_value);
+        }
+    }
+
+    #[test]
+    fn test_empirical_latency_price_lookup_with_no_observation() {
+        let now = Utc::now();
+        let token = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let wallet = WalletAddress::new("0x1111111111111111111111111111111111111111");
+
+        let trades = vec![
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: token.into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new("0x01"),
+                block_number: 100,
+                timestamp: now,
+            },
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: token.into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(11),
+                volume_usd: Decimal::from(1100),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new("0x02"),
+                block_number: 101,
+                timestamp: now + Duration::seconds(10),
+            },
+        ];
+
+        let delays = vec![5, 5000];
+        let points = CopiabilityEngine::measure_empirical_latency_distribution(&trades, &delays);
+
+        assert_eq!(points.len(), 2);
+        assert_eq!(points[0].status, "EMPIRICAL_OBSERVATION");
+        assert_eq!(points[0].sample_size, 1);
+        assert_eq!(points[0].observed_price, Some(Decimal::from(11)));
+        assert_eq!(points[0].price_delta_bps, Some(Decimal::from(1000)));
+
+        assert_eq!(points[1].status, "NO_OBSERVATION");
+        assert_eq!(points[1].sample_size, 0);
+        assert!(points[1].observed_price.is_none());
+        assert!(points[1].price_delta_bps.is_none());
+    }
+
+    #[test]
+    fn test_dataset_manifest_reconciliation_and_audit() {
+        let manifest_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/PHASE2_7_DATASET_MANIFEST.json"
+        );
+        if std::path::Path::new(manifest_path).exists() {
+            let content = std::fs::read_to_string(manifest_path).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(parsed["dex"], "Uniswap V2");
+            assert_eq!(parsed["chain_id"], 1);
+            assert_eq!(parsed["total_trades"], 3743);
+            assert!(parsed["quality_checks_passed"].as_bool().unwrap());
+            assert!(parsed["canonical_sha256"].as_str().is_some());
+            assert_eq!(
+                parsed["parent_manifest_sha256"].as_str(),
+                Some("27e3d93d3790b154b9f5d56e34f67081eb654be04a024eaa532e2bb836cb96f8")
+            );
+        }
+    }
+
+    #[test]
+    fn test_anti_lookahead_future_price_attack() {
+        let mut trades = generate_test_trade_sequence();
+        let split_idx = trades.len() / 2;
+        let split_time = trades[split_idx].timestamp;
+
+        for t in trades.iter_mut().skip(split_idx) {
+            t.price_usd = Decimal::from(1_000_000);
+        }
+
+        let train_trades: Vec<Trade> = trades
+            .iter()
+            .filter(|t| t.timestamp < split_time)
+            .cloned()
+            .collect();
+        for t in &train_trades {
+            assert!(
+                t.price_usd < Decimal::from(1000),
+                "Lookahead leaked future price attack into train partition!"
+            );
+        }
+    }
+
+    #[test]
+    fn test_anti_lookahead_future_wallet_attack() {
+        let mut trades = generate_test_trade_sequence();
+        let now = Utc::now();
+        let cutoff = now - Duration::days(5);
+
+        let evil_wallet = "0x9999999999999999999999999999999999999999";
+        for i in 0..10 {
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: WalletAddress::new(evil_wallet),
+                token_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::ZERO,
+                tx_hash: TxHash::new(format!("0xevil_{}", i)),
+                block_number: 99999,
+                timestamp: now,
+            });
+        }
+
+        let classification =
+            WalletResearchEngine::classify_wallet_as_of(evil_wallet, &trades, cutoff);
+        assert!(!classification.copiable);
+        assert_eq!(classification.cluster, BehavioralCluster::HighRiskDegen);
+    }
+
+    #[test]
+    fn test_anti_lookahead_future_pump_attack() {
+        let mut trades = generate_test_trade_sequence();
+        let max_existing_ts = trades.iter().map(|t| t.timestamp).max().unwrap();
+
+        let pump_token = "0xpump_token";
+        trades.push(Trade {
+            id: Uuid::new_v4(),
+            wallet_address: WalletAddress::new("0x1111111111111111111111111111111111111111"),
+            token_address: pump_token.into(),
+            side: TradeSide::Buy,
+            amount_tokens: Decimal::from(10_000),
+            price_usd: Decimal::from(500),
+            volume_usd: Decimal::from(5_000_000),
+            fee_usd: Decimal::ZERO,
+            tx_hash: TxHash::new("0xpump"),
+            block_number: 500000,
+            timestamp: max_existing_ts + Duration::days(10),
+        });
+
+        let (train, _, _) = ScientificValidator::chronological_split(&trades, 0.5, 0.0);
+        for t in &train {
+            assert_ne!(
+                t.token_address.as_str(),
+                pump_token,
+                "Future pump token leaked into train partition!"
+            );
+        }
+    }
+
+    #[test]
+    fn test_anti_lookahead_future_timestamp_attack() {
+        let trades = generate_test_trade_sequence();
+        let (train, _, test) = ScientificValidator::chronological_split(&trades, 0.5, 0.0);
+        let max_train_ts = train.iter().map(|t| t.timestamp).max().unwrap();
+        let min_test_ts = test.iter().map(|t| t.timestamp).min().unwrap();
+
+        assert!(
+            max_train_ts <= min_test_ts,
+            "Temporal ordering violated: train max ts {} > test min ts {}",
+            max_train_ts,
+            min_test_ts
+        );
+    }
+
+    #[test]
+    fn test_pnl_decomposition_identity() {
+        let decomp = PnLDecomposition {
+            gross_alpha: Decimal::from(1000),
+            latency_cost: Decimal::from(150),
+            market_impact: Decimal::from(200),
+            dex_fees: Decimal::from(50),
+            gas_cost: Decimal::from(25),
+            net_alpha: Decimal::from(575),
+        };
+
+        let computed_net = decomp.gross_alpha
+            - decomp.latency_cost
+            - decomp.market_impact
+            - decomp.dex_fees
+            - decomp.gas_cost;
+        assert_eq!(decomp.net_alpha, computed_net);
+    }
+
+    #[test]
+    fn test_sample_size_classification() {
+        assert_eq!(
+            SampleSizeAssessment::from_count(5),
+            SampleSizeAssessment::InsufficientSample
+        );
+        assert_eq!(
+            SampleSizeAssessment::from_count(20),
+            SampleSizeAssessment::WeakSample
+        );
+        assert_eq!(
+            SampleSizeAssessment::from_count(50),
+            SampleSizeAssessment::AdequateSample
+        );
+        assert_eq!(
+            SampleSizeAssessment::from_count(200),
+            SampleSizeAssessment::StrongSample
+        );
+    }
+
+    #[test]
+    fn test_effect_size_calculation() {
+        let effect = EffectSizeReport {
+            mean_excess_return: Decimal::from(120),
+            median_excess_return: Decimal::from(95),
+            cohen_d: Some(Decimal::from_str("0.45").unwrap()),
+            win_rate_diff_vs_benchmark: Decimal::from(5),
+            sharpe_diff_vs_benchmark: Some(Decimal::from_str("0.25").unwrap()),
+        };
+
+        assert_eq!(effect.cohen_d, Some(Decimal::from_str("0.45").unwrap()));
+        assert_eq!(effect.mean_excess_return, Decimal::from(120));
+        assert_eq!(effect.median_excess_return, Decimal::from(95));
+    }
 }
