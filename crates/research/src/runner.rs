@@ -2,8 +2,8 @@ use crate::benchmarks::BenchmarkEngine;
 use crate::copiability::CopiabilityEngine;
 use crate::scalability::ScalabilityEngine;
 use crate::types::{
-    DataSource, ExperimentConfig, ExperimentId, ExperimentReport, LatencyMode, ScientificVerdict,
-    VerdictStatus,
+    DataSource, ExperimentConfig, ExperimentId, ExperimentReport, FrozenConfig, LatencyMode,
+    ScientificVerdict, VerdictStatus,
 };
 use crate::validation::ScientificValidator;
 use crate::wallet_engine::WalletResearchEngine;
@@ -27,11 +27,19 @@ impl ResearchRunner {
         config: &ExperimentConfig,
         git_commit: &str,
     ) -> ExperimentReport {
+        let frozen_config = FrozenConfig::freeze(config.clone());
+        let config = frozen_config.get();
+
         let experiment_id = ExperimentId::generate();
         let created_at = Utc::now();
 
         let mut sorted_trades = trades.to_vec();
-        sorted_trades.sort_by_key(|t| t.timestamp);
+        sorted_trades.sort_by(|a, b| {
+            a.timestamp
+                .cmp(&b.timestamp)
+                .then_with(|| a.tx_hash.as_str().cmp(b.tx_hash.as_str()))
+                .then_with(|| a.id.cmp(&b.id))
+        });
 
         let start_timestamp = sorted_trades
             .first()
@@ -53,6 +61,7 @@ impl ResearchRunner {
             hasher.update(t.price_usd.to_string().as_bytes());
             hasher.update(t.timestamp.timestamp_nanos_opt().unwrap_or(0).to_le_bytes());
             hasher.update(t.fee_usd.to_string().as_bytes());
+            hasher.update(t.tx_hash.as_str().as_bytes());
         }
         let dataset_hash = format!("{:x}", hasher.finalize());
 
@@ -185,10 +194,17 @@ impl ResearchRunner {
         let walk_forward_windows =
             ScientificValidator::walk_forward_analysis(&sorted_trades, 3, config.min_wallet_trades);
 
-        // 8. Ablation Study
+        // 8. Ablation Study (Strictly evaluated on Out-Of-Sample partition)
+        let eval_trades = if !test_all.is_empty() {
+            &test_all
+        } else {
+            &sorted_trades
+        };
+
         let ablation_results = ScientificValidator::ablation_study(
-            &sorted_trades,
-            &all_copiable_trades,
+            &train_all,
+            eval_trades,
+            eval_copiable_trades,
             train_end_timestamp,
         );
 
@@ -209,11 +225,7 @@ impl ResearchRunner {
         // 11. Empirical Benchmark Comparisons
         let benchmark_comparisons = BenchmarkEngine::evaluate_benchmarks(
             eval_copiable_trades,
-            if !test_all.is_empty() {
-                &test_all
-            } else {
-                &sorted_trades
-            },
+            eval_trades,
             config.initial_cash,
             config.random_benchmark_runs,
             config.seed,
@@ -225,6 +237,20 @@ impl ResearchRunner {
             .find(|p| p.delay_seconds == 2)
             .map(|p| p.net_pnl > Decimal::ZERO)
             .unwrap_or(false);
+
+        let smart_ret = benchmark_comparisons
+            .iter()
+            .find(|b| b.strategy_name.contains("SmartWalletCopy"))
+            .map(|b| b.total_return_pct)
+            .unwrap_or(Decimal::ZERO);
+
+        let naive_ret = benchmark_comparisons
+            .iter()
+            .find(|b| b.strategy_name.contains("NaiveCopy"))
+            .map(|b| b.total_return_pct)
+            .unwrap_or(Decimal::ZERO);
+
+        let beats_naive = smart_ret > naive_ret;
 
         let verdict_status = match config.data_source {
             DataSource::Synthetic => VerdictStatus::NotValidated,
@@ -238,7 +264,11 @@ impl ResearchRunner {
             DataSource::Real => {
                 if trades.len() < 50 {
                     VerdictStatus::InsufficientData
-                } else if !permutation_test.is_significant {
+                } else if !permutation_test.is_significant
+                    || test_metrics.net_pnl <= Decimal::ZERO
+                    || !beats_naive
+                    || test_metrics.max_drawdown_pct > Decimal::from(35)
+                {
                     VerdictStatus::NoStatisticalEdge
                 } else if !is_copiable_under_latency {
                     VerdictStatus::EdgeNotCopiable
@@ -258,19 +288,30 @@ impl ResearchRunner {
                 format!("INSUFFICIENT DATA: Dataset contains only {} trades, below scientific statistical power requirements.", trades.len())
             }
             VerdictStatus::NoStatisticalEdge => {
-                format!("NO STATISTICAL EDGE: Observed performance failed permutation testing (p={:.4} >= 0.05). Alpha is indistinguishable from luck.", permutation_test.p_value)
+                if !permutation_test.is_significant {
+                    format!("NO STATISTICAL EDGE: Observed performance failed permutation testing (p={:.4} >= 0.05). Alpha is indistinguishable from luck.", permutation_test.p_value)
+                } else if test_metrics.net_pnl <= Decimal::ZERO {
+                    "NO STATISTICAL EDGE: Out-of-sample (Test) net PnL is negative or zero, indicating overfitting or lack of predictive power.".to_string()
+                } else if !beats_naive {
+                    "NO STATISTICAL EDGE: Out-of-sample performance fails to outperform naive blind copy trading.".to_string()
+                } else {
+                    format!("NO STATISTICAL EDGE: Excessive out-of-sample drawdown ({:.1}% > 35%).", test_metrics.max_drawdown_pct)
+                }
             }
             VerdictStatus::EdgeNotCopiable => {
                 format!(
                     "EDGE NOT COPIABLE: Alpha exists in theoretical zero-latency terms but is eliminated under realistic latency (break-even: {}s).",
-                    break_even_latency.unwrap_or(1)
+                    break_even_latency.unwrap_or(2)
                 )
             }
             VerdictStatus::EdgeUnscalable => {
-                format!("EDGE UNSCALABLE: Alpha survives latency but is exhausted at capital allocations above ${}.", max_scalable_capital)
+                format!(
+                    "EDGE UNSCALABLE: Severe price impact limits capital capacity to ${} (threshold: $1,000).",
+                    max_scalable_capital
+                )
             }
             VerdictStatus::PromisingButUnproven => {
-                "PROMISING BUT UNPROVEN: Positive signals observed on mixed dataset, but full empirical validation on unadulterated real on-chain data is required.".to_string()
+                "PROMISING BUT UNPROVEN: Hybrid dataset indicates edge but requires pure on-chain validation.".to_string()
             }
             VerdictStatus::EmpiricallySupported => {
                 format!(

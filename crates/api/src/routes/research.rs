@@ -145,8 +145,12 @@ pub async fn run_custom_experiment(
     State(state): State<AppState>,
     Json(config): Json<ExperimentConfig>,
 ) -> Result<Json<ExperimentReport>, StatusCode> {
-    let (trades, _) = fetch_or_synthesize_trades(&state, 2000).await;
-    let report = ResearchRunner::run_experiment(&trades, &config, "git-head");
+    let (trades, actual_data_source) = fetch_or_synthesize_trades(&state, 2000).await;
+    let mut effective_config = config;
+    if actual_data_source == research::DataSource::Synthetic {
+        effective_config.data_source = research::DataSource::Synthetic;
+    }
+    let report = ResearchRunner::run_experiment(&trades, &effective_config, "git-head");
     Ok(Json(report))
 }
 

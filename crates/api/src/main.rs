@@ -280,29 +280,38 @@ async fn main() -> Result<()> {
                 anyhow::bail!("--require-real-data was specified, but --source is set to synthetic. Aborting.");
             }
 
-            let trades = if data_source == research::DataSource::Synthetic {
-                routes::research::generate_synthetic_research_dataset()
+            let (trades, actual_data_source) = if data_source == research::DataSource::Synthetic {
+                (
+                    routes::research::generate_synthetic_research_dataset(),
+                    research::DataSource::Synthetic,
+                )
             } else if let Some(ref db) = db_opt {
                 let db_trades = db.get_all_trades(5000).await?;
                 if db_trades.is_empty() {
                     if require_real_data {
                         anyhow::bail!("--require-real-data was specified, but the database contains 0 historical trades. Aborting.");
                     }
-                    warn!("No live trades found in DB; falling back to synthetic dataset");
-                    routes::research::generate_synthetic_research_dataset()
+                    warn!("No live trades found in DB; falling back to synthetic dataset. Overriding DataSource to SYNTHETIC.");
+                    (
+                        routes::research::generate_synthetic_research_dataset(),
+                        research::DataSource::Synthetic,
+                    )
                 } else {
-                    db_trades
+                    (db_trades, data_source)
                 }
             } else {
                 if require_real_data {
                     anyhow::bail!("--require-real-data was specified, but database connection is unavailable. Aborting.");
                 }
-                warn!("Database connection unavailable; running research on synthetic dataset");
-                routes::research::generate_synthetic_research_dataset()
+                warn!("Database connection unavailable; falling back to synthetic dataset. Overriding DataSource to SYNTHETIC.");
+                (
+                    routes::research::generate_synthetic_research_dataset(),
+                    research::DataSource::Synthetic,
+                )
             };
 
             let exp_config = research::ExperimentConfig {
-                data_source,
+                data_source: actual_data_source,
                 seed,
                 require_real_data,
                 ..Default::default()

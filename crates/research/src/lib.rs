@@ -564,11 +564,21 @@ mod tests {
         let r1 = ResearchRunner::run_experiment(&trades, &config1, "v1");
         let r2 = ResearchRunner::run_experiment(&trades, &config2, "v1");
 
+        assert_eq!(r1.dataset_hash, r2.dataset_hash);
+        assert_eq!(r1.train_selected_wallets, r2.train_selected_wallets);
+        assert_eq!(r1.train_metrics.net_pnl, r2.train_metrics.net_pnl);
+        assert_eq!(r1.test_metrics.net_pnl, r2.test_metrics.net_pnl);
         assert_eq!(r1.permutation_test.p_value, r2.permutation_test.p_value);
         assert_eq!(
             r1.permutation_test.null_mean_sharpe,
             r2.permutation_test.null_mean_sharpe
         );
+        assert_eq!(r1.bootstrap_ci[0].mean, r2.bootstrap_ci[0].mean);
+        assert_eq!(
+            r1.benchmark_comparisons[0].total_return_pct,
+            r2.benchmark_comparisons[0].total_return_pct
+        );
+        assert_eq!(r1.verdict.status, r2.verdict.status);
     }
 
     #[test]
@@ -582,5 +592,767 @@ mod tests {
                 "Walk-forward train window must end before test window begins"
             );
         }
+    }
+
+    // =========================================================================
+    // RED TEAM ADVERSARIAL TEST SUITE (Phase 2.2 Independent Verification)
+    // =========================================================================
+
+    #[test]
+    fn test_red_team_a_bad_in_train_10x_in_test_never_selected() {
+        let now = Utc::now();
+        let bad_wallet = WalletAddress::new("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let good_wallet = WalletAddress::new("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let mut trades = Vec::new();
+
+        // 1. In Train (days -30 to -10): bad_wallet loses 50% on every trade
+        for i in 0..6 {
+            let t = now - Duration::days(30) + Duration::days(i * 2);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: bad_wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xa_buy_{}", i)),
+                block_number: 100 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: bad_wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(5), // -50% loss
+                volume_usd: Decimal::from(500),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xa_sell_{}", i)),
+                block_number: 101 + i as u64,
+                timestamp: t + Duration::hours(1),
+            });
+        }
+
+        // Good wallet performs well in Train
+        for i in 0..6 {
+            let t = now - Duration::days(29) + Duration::days(i * 2);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: good_wallet.clone(),
+                token_address: "0x2222222222222222222222222222222222222222".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xb_buy_{}", i)),
+                block_number: 200 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: good_wallet.clone(),
+                token_address: "0x2222222222222222222222222222222222222222".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(20), // +100% gain
+                volume_usd: Decimal::from(2000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xb_sell_{}", i)),
+                block_number: 201 + i as u64,
+                timestamp: t + Duration::days(2),
+            });
+        }
+
+        // 2. In Test (days -5 to now): bad_wallet suddenly gets massive 10x gains
+        for i in 0..6 {
+            let t = now - Duration::days(5) + Duration::hours(i * 12);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: bad_wallet.clone(),
+                token_address: "0x3333333333333333333333333333333333333333".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xa_post_buy_{}", i)),
+                block_number: 500 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: bad_wallet.clone(),
+                token_address: "0x3333333333333333333333333333333333333333".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(100), // 10x gain
+                volume_usd: Decimal::from(10000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xa_post_sell_{}", i)),
+                block_number: 501 + i as u64,
+                timestamp: t + Duration::hours(2),
+            });
+        }
+
+        let config = ExperimentConfig {
+            train_ratio: 0.60,
+            val_ratio: 0.10,
+            test_ratio: 0.30,
+            min_wallet_trades: 5,
+            permutation_iterations: 10,
+            bootstrap_iterations: 20,
+            ..Default::default()
+        };
+
+        let report = ResearchRunner::run_experiment(&trades, &config, "v1");
+
+        // RED TEAM ASSERTION: Bad wallet must NOT be selected in train
+        assert!(
+            !report
+                .train_selected_wallets
+                .contains(&bad_wallet.to_string()),
+            "Adversarial Test A Failed: Wallet with future 10x gains leaked into Train selection!"
+        );
+        // And good wallet was properly selected
+        assert!(
+            report
+                .train_selected_wallets
+                .contains(&good_wallet.to_string()),
+            "Good wallet in train should have been selected"
+        );
+    }
+
+    #[test]
+    fn test_red_team_b_great_in_train_catastrophic_in_test_fully_realized() {
+        let now = Utc::now();
+        let wallet = WalletAddress::new("0xcccccccccccccccccccccccccccccccccccccccc");
+        let mut trades = Vec::new();
+
+        // 1. In Train (days -30 to -10): Wallet wins consistently (+100% gain, 6 round-trips)
+        for i in 0..6 {
+            let t = now - Duration::days(30) + Duration::days(i * 3);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xc_train_b_{}", i)),
+                block_number: 100 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(20),
+                volume_usd: Decimal::from(2000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xc_train_s_{}", i)),
+                block_number: 101 + i as u64,
+                timestamp: t + Duration::days(1),
+            });
+        }
+
+        // 2. In Test (days -5 to now): Wallet suffers catastrophic 90% loss
+        for i in 0..6 {
+            let t = now - Duration::days(5) + Duration::hours(i * 12);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x2222222222222222222222222222222222222222".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(100),
+                volume_usd: Decimal::from(10000),
+                fee_usd: Decimal::from(5),
+                tx_hash: TxHash::new(format!("0xc_test_b_{}", i)),
+                block_number: 500 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x2222222222222222222222222222222222222222".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10), // -90% crash
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(5),
+                tx_hash: TxHash::new(format!("0xc_test_s_{}", i)),
+                block_number: 501 + i as u64,
+                timestamp: t + Duration::hours(2),
+            });
+        }
+
+        let config = ExperimentConfig {
+            train_ratio: 0.50,
+            val_ratio: 0.10,
+            test_ratio: 0.40,
+            min_wallet_trades: 5,
+            permutation_iterations: 10,
+            bootstrap_iterations: 20,
+            ..Default::default()
+        };
+
+        let report = ResearchRunner::run_experiment(&trades, &config, "v1");
+
+        // Selected in train based on history
+        assert!(
+            report.train_selected_wallets.contains(&wallet.to_string()),
+            "Wallet should be selected based on stellar train performance"
+        );
+        // RED TEAM ASSERTION: Loss in test must be strictly accounted for
+        assert!(
+            report.test_metrics.net_pnl < Decimal::ZERO,
+            "Adversarial Test B Failed: Out-of-sample crash was magically avoided! Test Net PnL: {}",
+            report.test_metrics.net_pnl
+        );
+        assert!(
+            report.test_metrics.max_drawdown_pct >= Decimal::from(80),
+            "Adversarial Test B Failed: Max drawdown was not fully recognized: {}",
+            report.test_metrics.max_drawdown_pct
+        );
+    }
+
+    #[test]
+    fn test_red_team_c_altering_future_timestamps_preserves_train_selection() {
+        let base_trades = generate_test_trade_sequence();
+        let now = Utc::now();
+        let cutoff = now - Duration::days(5);
+
+        let selected_1 =
+            WalletResearchEngine::select_copiable_wallets_as_of(&base_trades, cutoff, 3);
+
+        // Mutate future trades by adding +100 days
+        let mut mutated_future = base_trades.clone();
+        for t in &mut mutated_future {
+            if t.timestamp > cutoff {
+                t.timestamp += Duration::days(100);
+            }
+        }
+
+        let selected_2 =
+            WalletResearchEngine::select_copiable_wallets_as_of(&mutated_future, cutoff, 3);
+
+        assert_eq!(selected_1.len(), selected_2.len());
+        for (a, b) in selected_1.iter().zip(&selected_2) {
+            assert_eq!(a.wallet_address, b.wallet_address);
+            assert_eq!(a.copiable, b.copiable);
+            assert_eq!(a.persistence_score, b.persistence_score);
+        }
+    }
+
+    #[test]
+    fn test_red_team_d_altering_future_prices_preserves_train_classifications() {
+        let base_trades = generate_test_trade_sequence();
+        let now = Utc::now();
+        let cutoff = now - Duration::days(5);
+
+        let c1 = WalletResearchEngine::classify_wallet_as_of(
+            "0x2222222222222222222222222222222222222222",
+            &base_trades,
+            cutoff,
+        );
+
+        // Mutate future trades with 1,000,000 price
+        let mut mutated_future = base_trades.clone();
+        for t in &mut mutated_future {
+            if t.timestamp > cutoff {
+                t.price_usd = Decimal::from(1_000_000);
+            }
+        }
+
+        let c2 = WalletResearchEngine::classify_wallet_as_of(
+            "0x2222222222222222222222222222222222222222",
+            &mutated_future,
+            cutoff,
+        );
+
+        assert_eq!(c1.cluster, c2.cluster);
+        assert_eq!(c1.copiable, c2.copiable);
+        assert_eq!(c1.persistence_score, c2.persistence_score);
+    }
+
+    #[test]
+    fn test_red_team_e_wallet_only_in_test_never_in_train_selection() {
+        let now = Utc::now();
+        let mut trades = generate_test_trade_sequence();
+        let test_only_wallet = WalletAddress::new("0x9999999999999999999999999999999999999999");
+
+        // Add 10 winning trades for test_only_wallet occurring exclusively at current time (in test set)
+        for i in 0..10 {
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: test_only_wallet.clone(),
+                token_address: "0x8888888888888888888888888888888888888888".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new(format!("0xnew_b_{}", i)),
+                block_number: 900 + i as u64,
+                timestamp: now + Duration::hours(i as i64),
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: test_only_wallet.clone(),
+                token_address: "0x8888888888888888888888888888888888888888".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(50), // 5x
+                volume_usd: Decimal::from(5000),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new(format!("0xnew_s_{}", i)),
+                block_number: 901 + i as u64,
+                timestamp: now + Duration::hours(i as i64) + Duration::minutes(30),
+            });
+        }
+
+        let config = ExperimentConfig {
+            train_ratio: 0.60,
+            val_ratio: 0.20,
+            test_ratio: 0.20,
+            permutation_iterations: 10,
+            bootstrap_iterations: 20,
+            ..Default::default()
+        };
+
+        let report = ResearchRunner::run_experiment(&trades, &config, "v1");
+
+        assert!(
+            !report
+                .train_selected_wallets
+                .contains(&test_only_wallet.to_string()),
+            "Wallet trading only in Test partition must never appear in Train selection!"
+        );
+    }
+
+    #[test]
+    fn test_red_team_f_no_future_trades_passed_to_train_selection() {
+        let trades = generate_test_trade_sequence();
+        let (train, val, test) = ScientificValidator::chronological_split(&trades, 0.60, 0.20);
+        let train_end = train.last().unwrap().timestamp;
+
+        for t in &train {
+            assert!(
+                t.timestamp <= train_end,
+                "Train trade timestamp must be <= train_end"
+            );
+        }
+        for t in &val {
+            assert!(
+                t.timestamp >= train_end,
+                "Val trade timestamp must be >= train_end"
+            );
+        }
+        for t in &test {
+            assert!(
+                t.timestamp > train_end,
+                "Test trade timestamp must be strictly > train_end"
+            );
+        }
+    }
+
+    #[test]
+    fn test_red_team_walk_forward_isolation_future_pump_unseen() {
+        let mut trades = generate_test_trade_sequence();
+        let initial_windows = ScientificValidator::walk_forward_analysis(&trades, 2, 2);
+
+        // Inject 100x trade at the very end of the dataset
+        let last_time = trades.last().unwrap().timestamp;
+        trades.push(Trade {
+            id: Uuid::new_v4(),
+            wallet_address: WalletAddress::new("0x2222222222222222222222222222222222222222"),
+            token_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+            side: TradeSide::Sell,
+            amount_tokens: Decimal::from(100),
+            price_usd: Decimal::from(10000), // 100x
+            volume_usd: Decimal::from(1000000),
+            fee_usd: Decimal::ZERO,
+            tx_hash: TxHash::new("0xfuture_pump"),
+            block_number: 99999,
+            timestamp: last_time + Duration::days(10),
+        });
+
+        let updated_windows = ScientificValidator::walk_forward_analysis(&trades, 2, 2);
+
+        // Window 0 (the earliest window) must be completely unaffected by future 100x injection
+        assert_eq!(
+            initial_windows[0].in_sample_sharpe, updated_windows[0].in_sample_sharpe,
+            "Early walk-forward window In-Sample Sharpe must remain invariant to future pump!"
+        );
+    }
+
+    #[test]
+    fn test_red_team_permutation_null_vs_true_signal() {
+        let now = Utc::now();
+        let wallet1 = WalletAddress::new("0x1111111111111111111111111111111111111111");
+        let wallet2 = WalletAddress::new("0x2222222222222222222222222222222222222222");
+
+        // 1. True signal dataset: Wallets consistently achieve +30% profit
+        let mut signal_trades = Vec::new();
+        for i in 0..10 {
+            let t = now - Duration::days(20) + Duration::days(i);
+            let w = if i % 2 == 0 { &wallet1 } else { &wallet2 };
+            signal_trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: w.clone(),
+                token_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new(format!("0xsb_{}", i)),
+                block_number: 10 + i as u64,
+                timestamp: t,
+            });
+            signal_trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: w.clone(),
+                token_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(13), // +30%
+                volume_usd: Decimal::from(1300),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new(format!("0xss_{}", i)),
+                block_number: 11 + i as u64,
+                timestamp: t + Duration::hours(2),
+            });
+        }
+
+        let signal_result = ScientificValidator::permutation_test(&signal_trades, 100, 42);
+        assert!(
+            signal_result.is_significant,
+            "Permutation test must detect true consistent signal (p={})",
+            signal_result.p_value
+        );
+        assert!(signal_result.p_value < 0.05);
+
+        // 2. Zero-alpha / null dataset: Flat trades with zero net gain
+        let mut null_trades = Vec::new();
+        for i in 0..10 {
+            let t = now - Duration::days(20) + Duration::days(i);
+            let w = if i % 2 == 0 { &wallet1 } else { &wallet2 };
+            null_trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: w.clone(),
+                token_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new(format!("0xnb_{}", i)),
+                block_number: 10 + i as u64,
+                timestamp: t,
+            });
+            null_trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: w.clone(),
+                token_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10), // 0% gain
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(1),
+                tx_hash: TxHash::new(format!("0xns_{}", i)),
+                block_number: 11 + i as u64,
+                timestamp: t + Duration::hours(2),
+            });
+        }
+
+        let null_result = ScientificValidator::permutation_test(&null_trades, 100, 42);
+        assert!(
+            !null_result.is_significant,
+            "Permutation test must NOT find alpha in zero-edge null dataset (p={})",
+            null_result.p_value
+        );
+    }
+
+    #[test]
+    fn test_red_team_dataset_hashing_full_field_sensitivity_and_order_invariance() {
+        let base_trades = generate_test_trade_sequence();
+        let config = ExperimentConfig::default();
+
+        let base_hash = ResearchRunner::run_experiment(&base_trades, &config, "c").dataset_hash;
+
+        // 1. Mutate price
+        let mut m_price = base_trades.clone();
+        m_price[0].price_usd += Decimal::from_str("0.01").unwrap();
+        assert_ne!(
+            base_hash,
+            ResearchRunner::run_experiment(&m_price, &config, "c").dataset_hash,
+            "Hash must change on price mutation"
+        );
+
+        // 2. Mutate timestamp
+        let mut m_time = base_trades.clone();
+        m_time[0].timestamp += Duration::seconds(1);
+        assert_ne!(
+            base_hash,
+            ResearchRunner::run_experiment(&m_time, &config, "c").dataset_hash,
+            "Hash must change on timestamp mutation"
+        );
+
+        // 3. Mutate wallet
+        let mut m_wallet = base_trades.clone();
+        m_wallet[0].wallet_address =
+            WalletAddress::new("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef");
+        assert_ne!(
+            base_hash,
+            ResearchRunner::run_experiment(&m_wallet, &config, "c").dataset_hash,
+            "Hash must change on wallet mutation"
+        );
+
+        // 4. Mutate token
+        let mut m_token = base_trades.clone();
+        m_token[0].token_address = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef".into();
+        assert_ne!(
+            base_hash,
+            ResearchRunner::run_experiment(&m_token, &config, "c").dataset_hash,
+            "Hash must change on token mutation"
+        );
+
+        // 5. Mutate amount
+        let mut m_amount = base_trades.clone();
+        m_amount[0].amount_tokens += Decimal::ONE;
+        assert_ne!(
+            base_hash,
+            ResearchRunner::run_experiment(&m_amount, &config, "c").dataset_hash,
+            "Hash must change on amount mutation"
+        );
+
+        // 6. Mutate tx_hash
+        let mut m_tx = base_trades.clone();
+        m_tx[0].tx_hash = TxHash::new("0xmutated_tx_hash");
+        assert_ne!(
+            base_hash,
+            ResearchRunner::run_experiment(&m_tx, &config, "c").dataset_hash,
+            "Hash must change on tx_hash mutation"
+        );
+
+        // 7. Shuffled trade slice order -> canonical sort yields IDENTICAL hash
+        let mut shuffled = base_trades.clone();
+        shuffled.reverse();
+        let shuffled_hash = ResearchRunner::run_experiment(&shuffled, &config, "c").dataset_hash;
+        assert_eq!(
+            base_hash, shuffled_hash,
+            "Canonical sorting must ensure hash invariance under input slice order permutation"
+        );
+    }
+
+    #[test]
+    fn test_red_team_strict_verdict_oos_loss_rejected_on_real_data() {
+        let now = Utc::now();
+        let wallet = WalletAddress::new("0x1111111111111111111111111111111111111111");
+        let mut trades = Vec::new();
+
+        // 50 total trades to meet sample size requirements for Real data
+        // Train trades: winning (+50%)
+        for i in 0..30 {
+            let t = now - Duration::days(50) + Duration::days(i);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xtrb_{}", i)),
+                block_number: 100 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(15),
+                volume_usd: Decimal::from(1500),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xtrs_{}", i)),
+                block_number: 101 + i as u64,
+                timestamp: t + Duration::hours(2),
+            });
+        }
+
+        // Test trades: severe losses (-50%)
+        for i in 0..20 {
+            let t = now - Duration::days(15) + Duration::hours(i * 12);
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(20),
+                volume_usd: Decimal::from(2000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xteb_{}", i)),
+                block_number: 500 + i as u64,
+                timestamp: t,
+            });
+            trades.push(Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(100),
+                price_usd: Decimal::from(10),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(2),
+                tx_hash: TxHash::new(format!("0xtes_{}", i)),
+                block_number: 501 + i as u64,
+                timestamp: t + Duration::hours(2),
+            });
+        }
+
+        let config = ExperimentConfig {
+            data_source: DataSource::Real,
+            train_ratio: 0.60,
+            val_ratio: 0.10,
+            test_ratio: 0.30,
+            permutation_iterations: 20,
+            bootstrap_iterations: 20,
+            ..Default::default()
+        };
+
+        let report = ResearchRunner::run_experiment(&trades, &config, "v1");
+
+        // RED TEAM ASSERTION: Out-of-sample losses on Real data must NOT emit EmpiricallySupported
+        assert_eq!(
+            report.verdict.status,
+            VerdictStatus::NoStatisticalEdge,
+            "Real data with unprofitable Out-of-Sample results must be rejected with NoStatisticalEdge!"
+        );
+        assert!(
+            report.verdict.conclusion.contains("NO STATISTICAL EDGE"),
+            "Conclusion must clearly explain the failure"
+        );
+    }
+
+    #[test]
+    fn test_red_team_pnl_decomposition_scenarios() {
+        let now = Utc::now();
+        let wallet = WalletAddress::new("0x1111111111111111111111111111111111111111");
+
+        // 1. Winning trade with fees
+        let trades_win = vec![
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(10),
+                price_usd: Decimal::from(100),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(5),
+                tx_hash: TxHash::new("0xw_b"),
+                block_number: 1,
+                timestamp: now - Duration::hours(2),
+            },
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(10),
+                price_usd: Decimal::from(150),
+                volume_usd: Decimal::from(1500),
+                fee_usd: Decimal::from(5),
+                tx_hash: TxHash::new("0xw_s"),
+                block_number: 2,
+                timestamp: now - Duration::hours(1),
+            },
+        ];
+        let m_win = ScientificValidator::evaluate_slice(&trades_win);
+        assert_eq!(m_win.net_pnl, Decimal::from(490)); // Gross $500 - $10 fees
+        assert_eq!(m_win.gross_pnl, Decimal::from(500));
+        assert_eq!(m_win.trading_fees, Decimal::from(10));
+        assert_eq!(m_win.gross_pnl - m_win.trading_fees, m_win.net_pnl);
+
+        // 2. Losing trade
+        let trades_loss = vec![
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(10),
+                price_usd: Decimal::from(100),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(5),
+                tx_hash: TxHash::new("0xl_b"),
+                block_number: 3,
+                timestamp: now - Duration::hours(2),
+            },
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(10),
+                price_usd: Decimal::from(70),
+                volume_usd: Decimal::from(700),
+                fee_usd: Decimal::from(5),
+                tx_hash: TxHash::new("0xl_s"),
+                block_number: 4,
+                timestamp: now - Duration::hours(1),
+            },
+        ];
+        let m_loss = ScientificValidator::evaluate_slice(&trades_loss);
+        assert_eq!(m_loss.net_pnl, Decimal::from(-310)); // Gross -$300 - $10 fees
+        assert_eq!(m_loss.gross_pnl, Decimal::from(-300));
+        assert_eq!(m_loss.trading_fees, Decimal::from(10));
+
+        // 3. High fees eating small profit
+        let trades_high_fees = vec![
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Buy,
+                amount_tokens: Decimal::from(10),
+                price_usd: Decimal::from(100),
+                volume_usd: Decimal::from(1000),
+                fee_usd: Decimal::from(50),
+                tx_hash: TxHash::new("0xhf_b"),
+                block_number: 5,
+                timestamp: now - Duration::hours(2),
+            },
+            Trade {
+                id: Uuid::new_v4(),
+                wallet_address: wallet.clone(),
+                token_address: "0x1111111111111111111111111111111111111111".into(),
+                side: TradeSide::Sell,
+                amount_tokens: Decimal::from(10),
+                price_usd: Decimal::from(105),
+                volume_usd: Decimal::from(1050),
+                fee_usd: Decimal::from(50),
+                tx_hash: TxHash::new("0xhf_s"),
+                block_number: 6,
+                timestamp: now - Duration::hours(1),
+            },
+        ];
+        let m_hf = ScientificValidator::evaluate_slice(&trades_high_fees);
+        assert_eq!(m_hf.gross_pnl, Decimal::from(50));
+        assert_eq!(m_hf.trading_fees, Decimal::from(100));
+        assert_eq!(m_hf.net_pnl, Decimal::from(-50)); // Net is negative despite positive gross!
     }
 }

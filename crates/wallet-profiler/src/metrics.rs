@@ -301,8 +301,22 @@ impl MetricsCalculator {
             Decimal::ZERO
         };
 
-        let max_drawdown = if peak_pnl > Decimal::ZERO {
-            max_drawdown_usd / peak_pnl
+        let capital_base = round_trips
+            .iter()
+            .map(|rt| rt.buy_price * rt.quantity)
+            .max()
+            .unwrap_or(Decimal::ZERO);
+
+        let peak_equity = if peak_pnl > Decimal::ZERO {
+            capital_base + peak_pnl
+        } else if capital_base > Decimal::ZERO {
+            capital_base
+        } else {
+            Decimal::ZERO
+        };
+
+        let max_drawdown = if peak_equity > Decimal::ZERO {
+            (max_drawdown_usd / peak_equity).min(Decimal::ONE)
         } else {
             Decimal::ZERO
         };
@@ -340,6 +354,10 @@ impl MetricsCalculator {
             let stdev = var.sqrt();
             if stdev > 1e-6 {
                 Decimal::from_f64_retain(mean / stdev)
+            } else if mean > 0.0 {
+                Some(Decimal::from(999))
+            } else if mean < 0.0 {
+                Some(Decimal::from(-999))
             } else {
                 None
             }

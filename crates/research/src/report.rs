@@ -160,7 +160,11 @@ impl ReportGenerator {
                 s.net_pnl,
                 s.return_pct * rust_decimal::Decimal::from(100),
                 s.avg_price_impact_bps,
-                s.is_real_liquidity,
+                if s.is_real_liquidity {
+                    "REAL_ONCHAIN"
+                } else {
+                    "STRESS_TEST_ASSUMPTION"
+                },
                 if s.capacity_exhausted {
                     "EXHAUSTED"
                 } else {

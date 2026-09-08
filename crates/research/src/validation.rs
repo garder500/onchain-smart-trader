@@ -354,15 +354,16 @@ impl ScientificValidator {
 
     /// Runs genuine ablation tests comparing baseline with isolated mechanism removals:
     /// 1. Baseline: Full filtering (Smart Wallets + Persistence + 0s latency)
-    /// 2. NoWalletFilter: Copying all unfiltered wallets blindly
+    /// 2. NoWalletFilter: Copying all unfiltered wallets blindly in evaluation partition
     /// 3. NoPersistenceFilter: Including smart wallets regardless of persistence score
-    /// 4. AdverseLatency: Applying realistic execution delay penalty (5s)
+    /// 4. AdverseLatency: Applying realistic execution delay penalty (+5s delay)
     pub fn ablation_study(
-        all_unfiltered_trades: &[Trade],
-        copiable_trades: &[Trade],
+        train_trades: &[Trade],
+        eval_trades: &[Trade],
+        baseline_eval_trades: &[Trade],
         as_of_timestamp: DateTime<Utc>,
     ) -> Vec<AblationVariantResult> {
-        let baseline = Self::evaluate_slice(copiable_trades);
+        let baseline = Self::evaluate_slice(baseline_eval_trades);
         let mut variants = Vec::new();
 
         variants.push(AblationVariantResult {
@@ -373,8 +374,8 @@ impl ScientificValidator {
             pnl_delta_pct: Decimal::ZERO,
         });
 
-        // Variant 1: NoWalletFilter - Copy all wallets blindly
-        let m_unfiltered = Self::evaluate_slice(all_unfiltered_trades);
+        // Variant 1: NoWalletFilter - Copy all wallets blindly in evaluation partition
+        let m_unfiltered = Self::evaluate_slice(eval_trades);
         let delta_unfiltered = if baseline.net_pnl.abs() > Decimal::ZERO {
             ((m_unfiltered.net_pnl - baseline.net_pnl) / baseline.net_pnl.abs())
                 * Decimal::from(100)
@@ -391,7 +392,7 @@ impl ScientificValidator {
 
         // Variant 2: NoPersistenceFilter - Smart wallets without checking consistency across time
         let mut wallet_trades: HashMap<String, Vec<Trade>> = HashMap::new();
-        for t in all_unfiltered_trades {
+        for t in train_trades {
             if t.timestamp <= as_of_timestamp {
                 wallet_trades
                     .entry(t.wallet_address.as_str().to_string())
@@ -412,7 +413,7 @@ impl ScientificValidator {
                 non_persistent_copiable_addrs.insert(addr.clone());
             }
         }
-        let non_persistent_trades: Vec<Trade> = all_unfiltered_trades
+        let non_persistent_trades: Vec<Trade> = eval_trades
             .iter()
             .filter(|t| non_persistent_copiable_addrs.contains(t.wallet_address.as_str()))
             .cloned()
@@ -434,7 +435,7 @@ impl ScientificValidator {
         });
 
         // Variant 3: Adverse Execution Latency (+5s Delay)
-        let degraded_trades: Vec<Trade> = copiable_trades
+        let degraded_trades: Vec<Trade> = baseline_eval_trades
             .iter()
             .map(|t| {
                 let mut degraded = t.clone();
