@@ -18,7 +18,9 @@ impl WalletResearchEngine {
     ) -> WalletClassification {
         let valid_trades: Vec<&Trade> = trades
             .iter()
-            .filter(|t| t.timestamp <= as_of_timestamp)
+            .filter(|t| {
+                t.wallet_address.as_str() == wallet_address && t.timestamp <= as_of_timestamp
+            })
             .collect();
 
         let owned_valid_trades: Vec<Trade> = valid_trades.into_iter().cloned().collect();
