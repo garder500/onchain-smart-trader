@@ -23,7 +23,7 @@ impl std::fmt::Display for WalletCategory {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WalletMetrics {
     pub total_trades: usize,
     pub winning_trades: usize,
@@ -38,6 +38,16 @@ pub struct WalletMetrics {
     pub tokens_traded: usize,
     pub early_entry_ratio: Decimal,
     pub rug_exposure_count: usize,
+    #[serde(default)]
+    pub loss_rate: Decimal,
+    #[serde(default)]
+    pub expectancy: Decimal,
+    #[serde(default)]
+    pub unrealized_pnl: Decimal,
+    #[serde(default)]
+    pub unclosed_positions_count: usize,
+    #[serde(default)]
+    pub sharpe_ratio: Option<Decimal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

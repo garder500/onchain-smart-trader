@@ -13,10 +13,18 @@ pub struct WalletContext {
 }
 
 pub fn calculate_wallet_score(context: &WalletContext) -> WalletScore {
-    let metrics = MetricsCalculator::compute_metrics(
+    calculate_wallet_score_with_market_prices(context, None)
+}
+
+pub fn calculate_wallet_score_with_market_prices(
+    context: &WalletContext,
+    market_prices: Option<&std::collections::HashMap<String, Decimal>>,
+) -> WalletScore {
+    let metrics = MetricsCalculator::compute_metrics_with_market_prices(
         &context.trades,
         context.eval_timestamp,
         3600, // 1 hour early entry window
+        market_prices,
     );
 
     let mut explanation = Vec::new();

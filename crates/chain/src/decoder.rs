@@ -72,6 +72,7 @@ impl EventDecoder {
     }
 
     /// Decodes a Uniswap V2 Swap event
+    #[allow(clippy::too_many_arguments)]
     pub fn decode_swap_v2(
         pool_address: &str,
         tx_hash: &str,
