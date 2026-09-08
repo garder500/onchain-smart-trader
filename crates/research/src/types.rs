@@ -129,6 +129,9 @@ pub enum BehavioralCluster {
     HighRiskDegen,
     MarketMakerLike,
     BotLike,
+    HighFrequency,
+    LowFrequency,
+    Copycat,
 }
 
 impl std::fmt::Display for BehavioralCluster {
@@ -140,6 +143,9 @@ impl std::fmt::Display for BehavioralCluster {
             BehavioralCluster::HighRiskDegen => write!(f, "HIGH_RISK_DEGEN"),
             BehavioralCluster::MarketMakerLike => write!(f, "MARKET_MAKER_LIKE"),
             BehavioralCluster::BotLike => write!(f, "BOT_LIKE"),
+            BehavioralCluster::HighFrequency => write!(f, "HIGH_FREQUENCY"),
+            BehavioralCluster::LowFrequency => write!(f, "LOW_FREQUENCY"),
+            BehavioralCluster::Copycat => write!(f, "COPYCAT"),
         }
     }
 }
@@ -151,6 +157,22 @@ pub struct WalletClassification {
     pub persistence_score: Decimal,
     pub copiable: bool,
     pub reasoning: Vec<String>,
+    #[serde(default)]
+    pub avg_holding_time_seconds: u64,
+    #[serde(default)]
+    pub trade_frequency_per_day: Decimal,
+    #[serde(default)]
+    pub realized_volatility: Decimal,
+    #[serde(default)]
+    pub horizon_return_1s: Option<Decimal>,
+    #[serde(default)]
+    pub horizon_return_5s: Option<Decimal>,
+    #[serde(default)]
+    pub horizon_return_30s: Option<Decimal>,
+    #[serde(default)]
+    pub horizon_return_60s: Option<Decimal>,
+    #[serde(default)]
+    pub horizon_return_1h: Option<Decimal>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -276,6 +298,7 @@ pub enum VerdictStatus {
     InsufficientData,
     NoStatisticalEdge,
     EdgeNotCopiable,
+    EdgeTooSmall,
     EdgeUnscalable,
     PromisingButUnproven,
     EmpiricallySupported,
@@ -288,6 +311,7 @@ impl std::fmt::Display for VerdictStatus {
             VerdictStatus::InsufficientData => write!(f, "INSUFFICIENT_DATA"),
             VerdictStatus::NoStatisticalEdge => write!(f, "NO_STATISTICAL_EDGE"),
             VerdictStatus::EdgeNotCopiable => write!(f, "EDGE_NOT_COPIABLE"),
+            VerdictStatus::EdgeTooSmall => write!(f, "EDGE_TOO_SMALL"),
             VerdictStatus::EdgeUnscalable => write!(f, "EDGE_UNSCALABLE"),
             VerdictStatus::PromisingButUnproven => write!(f, "PROMISING_BUT_UNPROVEN"),
             VerdictStatus::EmpiricallySupported => write!(f, "EMPIRICALLY_SUPPORTED"),
@@ -330,4 +354,148 @@ pub struct ExperimentReport {
     pub bootstrap_ci: Vec<BootstrapConfidenceInterval>,
     pub benchmark_comparisons: Vec<BenchmarkComparison>,
     pub verdict: ScientificVerdict,
+    #[serde(default)]
+    pub strategy_family_results: Vec<StrategyFamilyResult>,
+    #[serde(default)]
+    pub multiple_testing_report: Option<MultipleTestingReport>,
+    #[serde(default)]
+    pub regime_breakdown: Vec<RegimePerformance>,
+    #[serde(default)]
+    pub cross_pool_results: Vec<CrossPoolEvaluation>,
+    #[serde(default)]
+    pub unseen_wallet_results: Option<UnseenWalletEvaluation>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum StrategyFamily {
+    DirectCopy,
+    Confirmation,
+    Consensus,
+    WalletMomentum,
+    TokenAttention,
+}
+
+impl std::fmt::Display for StrategyFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StrategyFamily::DirectCopy => write!(f, "DIRECT_COPY"),
+            StrategyFamily::Confirmation => write!(f, "CONFIRMATION"),
+            StrategyFamily::Consensus => write!(f, "CONSENSUS"),
+            StrategyFamily::WalletMomentum => write!(f, "WALLET_MOMENTUM"),
+            StrategyFamily::TokenAttention => write!(f, "TOKEN_ATTENTION"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StrategyFamilyResult {
+    pub family: StrategyFamily,
+    pub name: String,
+    pub description: String,
+    pub latency_seconds: u64,
+    pub parameter_variant: String,
+    pub in_sample_sharpe: Option<Decimal>,
+    pub out_of_sample_sharpe: Option<Decimal>,
+    pub net_pnl: Decimal,
+    pub win_rate: Decimal,
+    pub profit_factor: Decimal,
+    pub max_drawdown_pct: Decimal,
+    pub trades_executed: usize,
+    pub raw_p_value: f64,
+    pub fdr_adjusted_p_value: f64,
+    pub is_significant_post_fdr: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventSnapshot {
+    pub timestamp: DateTime<Utc>,
+    pub token: String,
+    pub pool: String,
+    pub price: Decimal,
+    pub liquidity_usd: Decimal,
+    pub volume_usd: Decimal,
+    pub smart_wallet_count: usize,
+    pub smart_wallet_weighted_score: Decimal,
+    pub new_smart_wallets: usize,
+    pub buy_volume_usd: Decimal,
+    pub sell_volume_usd: Decimal,
+    pub wallet_entry_velocity: Decimal,
+    // Future outcomes - strictly evaluation labels, NEVER features at t
+    pub future_return_1s: Option<Decimal>,
+    pub future_return_5s: Option<Decimal>,
+    pub future_return_30s: Option<Decimal>,
+    pub future_return_60s: Option<Decimal>,
+    pub future_return_5m: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultipleTestingReport {
+    pub total_hypotheses_tested: usize,
+    pub target_fdr: f64,
+    pub rejected_null_count: usize,
+    pub lowest_raw_p_value: f64,
+    pub lowest_adjusted_p_value: f64,
+    pub discovery_method: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum MarketRegime {
+    HighVolatility,
+    LowVolatility,
+    HighLiquidity,
+    LowLiquidity,
+    BullTrend,
+    BearTrend,
+    Sideways,
+}
+
+impl std::fmt::Display for MarketRegime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MarketRegime::HighVolatility => write!(f, "HIGH_VOLATILITY"),
+            MarketRegime::LowVolatility => write!(f, "LOW_VOLATILITY"),
+            MarketRegime::HighLiquidity => write!(f, "HIGH_LIQUIDITY"),
+            MarketRegime::LowLiquidity => write!(f, "LOW_LIQUIDITY"),
+            MarketRegime::BullTrend => write!(f, "BULL_TREND"),
+            MarketRegime::BearTrend => write!(f, "BEAR_TREND"),
+            MarketRegime::Sideways => write!(f, "SIDEWAYS"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegimePerformance {
+    pub regime: MarketRegime,
+    pub trade_count: usize,
+    pub net_pnl: Decimal,
+    pub win_rate: Decimal,
+    pub trade_level_sharpe: Option<Decimal>,
+    pub profit_factor: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CrossPoolEvaluation {
+    pub train_pools: Vec<String>,
+    pub test_pool: String,
+    pub pool_type: String,
+    pub net_pnl: Decimal,
+    pub win_rate: Decimal,
+    pub out_of_sample_sharpe: Option<Decimal>,
+    pub trade_count: usize,
+    pub generalization_ratio: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnseenWalletEvaluation {
+    pub known_wallets_trades: usize,
+    pub known_wallets_sharpe: Option<Decimal>,
+    pub known_wallets_pnl: Decimal,
+    pub unseen_wallets_trades: usize,
+    pub unseen_wallets_sharpe: Option<Decimal>,
+    pub unseen_wallets_pnl: Decimal,
+    pub new_post_train_wallets_trades: usize,
+    pub new_post_train_wallets_sharpe: Option<Decimal>,
+    pub new_post_train_wallets_pnl: Decimal,
 }

@@ -296,6 +296,59 @@ impl ReportGenerator {
         }
         md.push('\n');
 
+        // Phase 2.6: Informational Alpha & Alternative Strategy Families
+        if !report.strategy_family_results.is_empty() {
+            md.push_str("## 9. Informational Alpha & Strategy Family Comparisons\n\n");
+            md.push_str("| Strategy Family | Variant | Latency / Window | OOS Net PnL ($) | Win Rate | OOS Sharpe | Drawdown | Trades | Raw p-val | Post-FDR Adj p-val | Significant? |\n");
+            md.push_str("|---|---|---|---|---|---|---|---|---|---|---|\n");
+            for s in &report.strategy_family_results {
+                md.push_str(&format!(
+                    "| `{}` | `{}` | `{}s` | `${:.2}` | `{:.1}%` | `{}` | `{:.1}%` | `{}` | `{:.4}` | `{:.4}` | {} |\n",
+                    s.family,
+                    s.name,
+                    s.latency_seconds,
+                    s.net_pnl,
+                    s.win_rate * rust_decimal::Decimal::from(100),
+                    s.out_of_sample_sharpe.map(|v| format!("{:.2}", v)).unwrap_or_else(|| "N/A".into()),
+                    s.max_drawdown_pct,
+                    s.trades_executed,
+                    s.raw_p_value,
+                    s.fdr_adjusted_p_value,
+                    if s.is_significant_post_fdr { "**YES**" } else { "No" }
+                ));
+            }
+            md.push('\n');
+        }
+
+        // Multiple Testing (FDR) Control
+        if let Some(ref mt) = report.multiple_testing_report {
+            md.push_str("## 10. Multiple Hypothesis Testing & FDR Control\n\n");
+            md.push_str(&format!(
+                "- **Correction Method**: `{}`\n",
+                mt.discovery_method
+            ));
+            md.push_str(&format!(
+                "- **Total Hypotheses Evaluated**: `{}`\n",
+                mt.total_hypotheses_tested
+            ));
+            md.push_str(&format!(
+                "- **Target False Discovery Rate (FDR)**: `{:.2}`\n",
+                mt.target_fdr
+            ));
+            md.push_str(&format!(
+                "- **Discoveries (Nulls Rejected)**: `{}`\n",
+                mt.rejected_null_count
+            ));
+            md.push_str(&format!(
+                "- **Minimum Raw p-value**: `{:.6}`\n",
+                mt.lowest_raw_p_value
+            ));
+            md.push_str(&format!(
+                "- **Minimum FDR-Adjusted q-value**: `{:.6}`\n\n",
+                mt.lowest_adjusted_p_value
+            ));
+        }
+
         md
     }
 }

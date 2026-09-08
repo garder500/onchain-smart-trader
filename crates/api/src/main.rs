@@ -267,6 +267,7 @@ async fn main() -> Result<()> {
             source,
             require_real_data,
             seed,
+            strategy,
             format,
             out,
         } => {
@@ -318,7 +319,21 @@ async fn main() -> Result<()> {
             };
 
             let git_commit = env!("CARGO_PKG_VERSION");
-            let report = research::ResearchRunner::run_experiment(&trades, &exp_config, git_commit);
+            let mut report =
+                research::ResearchRunner::run_experiment(&trades, &exp_config, git_commit);
+
+            if strategy.to_lowercase() != "all" {
+                let filter_str = strategy.to_lowercase();
+                report.strategy_family_results.retain(|s| match s.family {
+                    research::StrategyFamily::DirectCopy => filter_str.contains("direct"),
+                    research::StrategyFamily::Confirmation => {
+                        filter_str.contains("confirmation") || filter_str.contains("informational")
+                    }
+                    research::StrategyFamily::Consensus => filter_str.contains("consensus"),
+                    research::StrategyFamily::WalletMomentum => filter_str.contains("momentum"),
+                    research::StrategyFamily::TokenAttention => filter_str.contains("attention"),
+                });
+            }
 
             let output_str = if format.to_lowercase() == "json" {
                 serde_json::to_string_pretty(&report)?
@@ -376,6 +391,98 @@ async fn main() -> Result<()> {
             }
             println!(
                 "================================================================================"
+            );
+        }
+
+        Commands::DatasetStatus => {
+            println!(
+                "================================================================================"
+            );
+            println!(
+                "                      ON-CHAIN HISTORICAL DATASET STATUS                        "
+            );
+            println!(
+                "================================================================================"
+            );
+            if let Some(ref db) = db_opt {
+                let trades = db.get_all_trades(100000).await?;
+                let unique_wallets: std::collections::HashSet<String> = trades
+                    .iter()
+                    .map(|t| t.wallet_address.as_str().to_string())
+                    .collect();
+                let unique_tokens: std::collections::HashSet<String> = trades
+                    .iter()
+                    .map(|t| t.token_address.as_str().to_string())
+                    .collect();
+                let total_vol: Decimal = trades.iter().map(|t| t.volume_usd).sum();
+
+                println!("Database Status:       Connected (PostgreSQL)");
+                println!("Total Trades in DB:    {}", trades.len());
+                println!("Unique Wallets:        {}", unique_wallets.len());
+                println!("Unique Tokens:         {}", unique_tokens.len());
+                println!("Total USD Volume:      ${:.2}", total_vol);
+                if let (Some(first), Some(last)) = (trades.first(), trades.last()) {
+                    println!(
+                        "Time Span:             {} -> {}",
+                        first.timestamp, last.timestamp
+                    );
+                }
+            } else {
+                println!("Database Status:       Disconnected");
+            }
+            if let Ok(manifest_content) =
+                tokio::fs::read_to_string("data/REAL_DATASET_MANIFEST.json").await
+            {
+                if let Ok(manifest) =
+                    serde_json::from_str::<indexer::DatasetManifest>(&manifest_content)
+                {
+                    println!("\nDataset Manifest:      data/REAL_DATASET_MANIFEST.json");
+                    println!("Canonical SHA-256:     {}", manifest.canonical_sha256);
+                    println!(
+                        "DEX / Chain:           {} / Chain ID {}",
+                        manifest.dex, manifest.chain_id
+                    );
+                    println!(
+                        "Quality Checks:        {}",
+                        if manifest.quality_checks_passed {
+                            "PASSED"
+                        } else {
+                            "FAILED"
+                        }
+                    );
+                }
+            }
+            println!(
+                "================================================================================"
+            );
+        }
+
+        Commands::ResearchReport { format, out } => {
+            let db = db_opt.context("Database connection required for ResearchReport")?;
+            let trades = db.get_all_trades(100000).await?;
+            if trades.is_empty() {
+                anyhow::bail!("No trades found in database to generate research report");
+            }
+
+            let exp_config = research::ExperimentConfig {
+                data_source: research::DataSource::Real,
+                require_real_data: true,
+                ..Default::default()
+            };
+
+            let git_commit = env!("CARGO_PKG_VERSION");
+            let report = research::ResearchRunner::run_experiment(&trades, &exp_config, git_commit);
+
+            let output_str = if format.to_lowercase() == "json" {
+                serde_json::to_string_pretty(&report)?
+            } else {
+                research::ReportGenerator::generate_markdown(&report)
+            };
+
+            tokio::fs::write(&out, &output_str).await?;
+            println!(
+                "Research report successfully generated and written to {}",
+                out
             );
         }
 

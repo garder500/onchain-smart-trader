@@ -167,15 +167,6 @@ impl ResearchRunner {
             latency_mode,
         );
 
-        // Find break-even latency
-        let mut break_even_latency = None;
-        for point in &delay_curve {
-            if point.net_pnl <= Decimal::ZERO && point.delay_seconds > 0 {
-                break_even_latency = Some(point.delay_seconds);
-                break;
-            }
-        }
-
         // 6. Scalability Engine: Capital Impact Curve
         let is_real_liquidity = config.data_source == DataSource::Real;
         let assumed_pool_liquidity = config.pool_liquidity.unwrap_or_else(|| {
@@ -237,6 +228,35 @@ impl ResearchRunner {
             config.seed,
         );
 
+        // 11b. Evaluate All 5 Strategy Families (Direct Copy, Confirmation, Consensus, Momentum, Attention)
+        let strategy_family_results =
+            crate::informational_alpha::InformationalAlphaEngine::evaluate_all_strategies(
+                &train_all,
+                eval_trades,
+                &selected_wallet_set,
+                config.initial_cash,
+                fixed_capital_per_trade,
+                fee_bps,
+            );
+
+        let multiple_testing_report = Some(crate::types::MultipleTestingReport {
+            total_hypotheses_tested: strategy_family_results.len(),
+            target_fdr: 0.05,
+            rejected_null_count: strategy_family_results
+                .iter()
+                .filter(|s| s.is_significant_post_fdr)
+                .count(),
+            lowest_raw_p_value: strategy_family_results
+                .iter()
+                .map(|s| s.raw_p_value)
+                .fold(1.0, f64::min),
+            lowest_adjusted_p_value: strategy_family_results
+                .iter()
+                .map(|s| s.fdr_adjusted_p_value)
+                .fold(1.0, f64::min),
+            discovery_method: "Benjamini-Hochberg (FDR q <= 0.05)".into(),
+        });
+
         // 12. Synthesize Scientific Verdict with Strict Data Source Segregation
         let is_copiable_under_latency = delay_curve
             .iter()
@@ -249,53 +269,48 @@ impl ResearchRunner {
             .find(|b| b.strategy_name.contains("SmartWalletCopy"))
             .map(|b| b.total_return_pct)
             .unwrap_or(Decimal::ZERO);
-
         let naive_ret = benchmark_comparisons
             .iter()
             .find(|b| b.strategy_name.contains("NaiveCopy"))
             .map(|b| b.total_return_pct)
             .unwrap_or(Decimal::ZERO);
-
         let beats_naive = smart_ret > naive_ret;
 
-        let verdict_status = match config.data_source {
-            DataSource::Synthetic => VerdictStatus::NotValidated,
-            DataSource::Mixed => {
-                if trades.len() < 30 {
-                    VerdictStatus::InsufficientData
-                } else {
-                    VerdictStatus::PromisingButUnproven
-                }
-            }
-            DataSource::Real => {
-                if trades.len() < 50 {
-                    VerdictStatus::InsufficientData
-                } else if !permutation_test.is_significant
-                    || test_metrics.net_pnl <= Decimal::ZERO
-                    || !beats_naive
-                    || test_metrics.max_drawdown_pct > Decimal::from(35)
-                {
-                    VerdictStatus::NoStatisticalEdge
-                } else if !is_copiable_under_latency {
-                    VerdictStatus::EdgeNotCopiable
-                } else if max_scalable_capital < Decimal::from(1000) {
-                    VerdictStatus::EdgeUnscalable
-                } else {
-                    VerdictStatus::EmpiricallySupported
-                }
-            }
+        let break_even_latency = delay_curve
+            .iter()
+            .find(|p| p.net_pnl <= Decimal::ZERO)
+            .map(|p| p.delay_seconds);
+
+        let verdict_status = if config.data_source == DataSource::Synthetic {
+            VerdictStatus::NotValidated
+        } else if eval_copiable_trades.len() < 5 {
+            VerdictStatus::InsufficientData
+        } else if !permutation_test.is_significant
+            || test_metrics.net_pnl <= Decimal::ZERO
+            || !beats_naive
+            || test_metrics.max_drawdown_pct > Decimal::from(35)
+        {
+            VerdictStatus::NoStatisticalEdge
+        } else if !is_copiable_under_latency {
+            VerdictStatus::EdgeNotCopiable
+        } else if max_scalable_capital < Decimal::from(1000) {
+            VerdictStatus::EdgeUnscalable
+        } else if config.data_source == DataSource::Mixed {
+            VerdictStatus::PromisingButUnproven
+        } else {
+            VerdictStatus::EmpiricallySupported
         };
 
         let conclusion = match verdict_status {
             VerdictStatus::NotValidated => {
-                "NOT VALIDATED: Results are based on synthetic data and serve only to test engine functionality. No statistical alpha can be inferred.".to_string()
+                "NOT VALIDATED: Experiment executed on synthetic blockchain sequences. Alpha claims require verified on-chain datasets.".to_string()
             }
             VerdictStatus::InsufficientData => {
-                format!("INSUFFICIENT DATA: Dataset contains only {} trades, below scientific statistical power requirements.", trades.len())
+                "INSUFFICIENT DATA: Out-of-sample sample size too small for statistical rejection of null hypothesis.".to_string()
             }
             VerdictStatus::NoStatisticalEdge => {
                 if !permutation_test.is_significant {
-                    format!("NO STATISTICAL EDGE: Observed performance failed permutation testing (p={:.4} >= 0.05). Alpha is indistinguishable from luck.", permutation_test.p_value)
+                    format!("NO STATISTICAL EDGE: Permutation test p-value ({:.4}) fails significance threshold (p < 0.05). Alpha is indistinguishable from random luck.", permutation_test.p_value)
                 } else if test_metrics.net_pnl <= Decimal::ZERO {
                     "NO STATISTICAL EDGE: Out-of-sample (Test) net PnL is negative or zero, indicating overfitting or lack of predictive power.".to_string()
                 } else if !beats_naive {
@@ -309,6 +324,9 @@ impl ResearchRunner {
                     "EDGE NOT COPIABLE: Alpha exists in theoretical zero-latency terms but is eliminated under realistic latency (break-even: {}s).",
                     break_even_latency.unwrap_or(2)
                 )
+            }
+            VerdictStatus::EdgeTooSmall => {
+                "EDGE TOO SMALL: Positive expectancy exists but net profit is insufficient to cover gas, fees, and operational friction.".to_string()
             }
             VerdictStatus::EdgeUnscalable => {
                 format!(
@@ -362,6 +380,11 @@ impl ResearchRunner {
             bootstrap_ci,
             benchmark_comparisons,
             verdict,
+            strategy_family_results,
+            multiple_testing_report,
+            regime_breakdown: Vec::new(),
+            cross_pool_results: Vec::new(),
+            unseen_wallet_results: None,
         }
     }
 }

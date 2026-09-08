@@ -466,4 +466,33 @@ impl ScientificValidator {
 
         variants
     }
+
+    /// Computes Benjamini-Hochberg (False Discovery Rate) adjusted p-values.
+    /// Given raw p-values [p_1, ..., p_m], sorts them:
+    /// p_(1) <= p_(2) <= ... <= p_(m)
+    /// Adjusted p-value: q_(i) = min_{k >= i} [ (m / k) * p_(k) ] capped at 1.0
+    pub fn benjamini_hochberg_correction(raw_p_values: &[f64]) -> Vec<f64> {
+        let m = raw_p_values.len();
+        if m == 0 {
+            return Vec::new();
+        }
+
+        let mut indexed: Vec<(usize, f64)> = raw_p_values.iter().cloned().enumerate().collect();
+        // Sort ascending by p-value
+        indexed.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        let mut adjusted_indexed = vec![1.0; m];
+        let mut min_so_far: f64 = 1.0;
+
+        // Iterate backwards from m down to 1
+        for rank in (1..=m).rev() {
+            let orig_idx = indexed[rank - 1].0;
+            let p_val = indexed[rank - 1].1;
+            let unconstrained_q = (p_val * (m as f64) / (rank as f64)).min(1.0);
+            min_so_far = min_so_far.min(unconstrained_q);
+            adjusted_indexed[orig_idx] = min_so_far;
+        }
+
+        adjusted_indexed
+    }
 }

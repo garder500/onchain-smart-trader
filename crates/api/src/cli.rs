@@ -68,6 +68,10 @@ pub enum Commands {
         #[arg(long, default_value = "42")]
         seed: u64,
 
+        /// Strategy family to evaluate: direct-copy | informational-alpha | consensus | all
+        #[arg(long, default_value = "all")]
+        strategy: String,
+
         /// Format: markdown | json
         #[arg(long, default_value = "markdown")]
         format: String,
@@ -75,6 +79,20 @@ pub enum Commands {
         /// Output path for report
         #[arg(long)]
         out: Option<String>,
+    },
+
+    /// Inspect dataset status, manifest, and on-chain records
+    DatasetStatus,
+
+    /// Generate complete Phase 2.6 research report
+    ResearchReport {
+        /// Format: markdown | json
+        #[arg(long, default_value = "markdown")]
+        format: String,
+
+        /// Output path for report (default: docs/PHASE2_6_RESEARCH_REPORT.md)
+        #[arg(long, default_value = "docs/PHASE2_6_RESEARCH_REPORT.md")]
+        out: String,
     },
 
     /// Run latency degradation and copiability matrix analysis

@@ -58,6 +58,34 @@ pub fn get_supported_pools() -> Vec<PoolConfig> {
             token1_decimals: 6,
             is_token0_usd: false,
         },
+        // WBTC / WETH (Major crypto pair, 8 decimals token0, 18 decimals token1)
+        PoolConfig {
+            name: "WBTC/WETH",
+            address: "0xbb2b8038a1640196fbe3e38816f3e67cba72d940",
+            token0_address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599",
+            token0_symbol: "WBTC",
+            token0_name: "Wrapped BTC",
+            token0_decimals: 8,
+            token1_address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            token1_symbol: "WETH",
+            token1_name: "Wrapped Ether",
+            token1_decimals: 18,
+            is_token0_usd: false,
+        },
+        // DAI / WETH (Decentralized stablecoin)
+        PoolConfig {
+            name: "DAI/WETH",
+            address: "0xa478c2975ab1ea89e8196811f51a7b7ade33eb11",
+            token0_address: "0x6b175474e89094c44da98b954eedeac495271d0f",
+            token0_symbol: "DAI",
+            token0_name: "Dai Stablecoin",
+            token0_decimals: 18,
+            token1_address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+            token1_symbol: "WETH",
+            token1_name: "Wrapped Ether",
+            token1_decimals: 18,
+            is_token0_usd: true,
+        },
     ]
 }
 

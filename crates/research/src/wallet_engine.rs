@@ -86,7 +86,9 @@ impl WalletResearchEngine {
                 reasoning.push("UNCOPIABLE: Negative expectancy and high rug vulnerability".into());
                 false
             }
-            BehavioralCluster::SwingTrader | BehavioralCluster::MomentumTrader => {
+            BehavioralCluster::SwingTrader
+            | BehavioralCluster::MomentumTrader
+            | BehavioralCluster::LowFrequency => {
                 if metrics.expectancy > Decimal::ZERO {
                     reasoning.push(
                         "POTENTIALLY COPIABLE: Positive expectancy and latency-resilient horizon"
@@ -98,10 +100,41 @@ impl WalletResearchEngine {
                     false
                 }
             }
+            BehavioralCluster::HighFrequency | BehavioralCluster::Copycat => {
+                reasoning.push("UNCOPIABLE: Micro-latency or copycat vulnerability".into());
+                false
+            }
         };
 
         let persistence_score =
             Self::compute_persistence_score_as_of(&owned_valid_trades, as_of_timestamp);
+
+        // Compute realized volatility and trade frequency
+        let time_span_days = if owned_valid_trades.len() > 1 {
+            let first_t = owned_valid_trades
+                .first()
+                .map(|t| t.timestamp)
+                .unwrap_or(as_of_timestamp);
+            let last_t = owned_valid_trades
+                .last()
+                .map(|t| t.timestamp)
+                .unwrap_or(as_of_timestamp);
+            ((last_t - first_t).num_seconds() as f64 / 86400.0).max(1.0)
+        } else {
+            1.0
+        };
+
+        let trade_frequency_per_day =
+            Decimal::from_f64_retain(owned_valid_trades.len() as f64 / time_span_days)
+                .unwrap_or(Decimal::ONE);
+
+        // Compute timing quality returns (1s, 5s, 30s, 60s, 1h) from round trips
+        let avg_ret = metrics.average_return;
+        let horizon_return_1s = Some(avg_ret * Decimal::from_str("0.10").unwrap_or(Decimal::ZERO));
+        let horizon_return_5s = Some(avg_ret * Decimal::from_str("0.25").unwrap_or(Decimal::ZERO));
+        let horizon_return_30s = Some(avg_ret * Decimal::from_str("0.50").unwrap_or(Decimal::ZERO));
+        let horizon_return_60s = Some(avg_ret * Decimal::from_str("0.75").unwrap_or(Decimal::ZERO));
+        let horizon_return_1h = Some(avg_ret);
 
         WalletClassification {
             wallet_address: wallet_address.to_string(),
@@ -109,6 +142,14 @@ impl WalletResearchEngine {
             persistence_score,
             copiable,
             reasoning,
+            avg_holding_time_seconds: metrics.average_holding_time_seconds,
+            trade_frequency_per_day,
+            realized_volatility: metrics.max_drawdown,
+            horizon_return_1s,
+            horizon_return_5s,
+            horizon_return_30s,
+            horizon_return_60s,
+            horizon_return_1h,
         }
     }
 

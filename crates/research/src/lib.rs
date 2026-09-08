@@ -1,5 +1,6 @@
 pub mod benchmarks;
 pub mod copiability;
+pub mod informational_alpha;
 pub mod report;
 pub mod runner;
 pub mod scalability;
@@ -9,6 +10,7 @@ pub mod wallet_engine;
 
 pub use benchmarks::BenchmarkEngine;
 pub use copiability::CopiabilityEngine;
+pub use informational_alpha::InformationalAlphaEngine;
 pub use report::ReportGenerator;
 pub use runner::ResearchRunner;
 pub use scalability::ScalabilityEngine;
@@ -22,6 +24,7 @@ mod tests {
     use chrono::{Duration, Utc};
     use domain::{Trade, TradeSide, TxHash, WalletAddress};
     use rust_decimal::Decimal;
+    use std::collections::HashSet;
     use std::str::FromStr;
     use uuid::Uuid;
 
@@ -1354,5 +1357,52 @@ mod tests {
         assert_eq!(m_hf.gross_pnl, Decimal::from(50));
         assert_eq!(m_hf.trading_fees, Decimal::from(100));
         assert_eq!(m_hf.net_pnl, Decimal::from(-50)); // Net is negative despite positive gross!
+    }
+
+    #[test]
+    fn test_benjamini_hochberg_fdr_correction() {
+        // Input raw p-values
+        let raw_p = vec![0.001, 0.01, 0.03, 0.04, 0.50];
+        let adjusted = ScientificValidator::benjamini_hochberg_correction(&raw_p);
+
+        assert_eq!(adjusted.len(), 5);
+        // Adjusted p-values must be >= raw p-values
+        for (raw, adj) in raw_p.iter().zip(adjusted.iter()) {
+            assert!(
+                adj >= raw,
+                "Adjusted p-value ({}) must be >= raw p-value ({})",
+                adj,
+                raw
+            );
+        }
+        // First hypothesis should remain significant (0.001 * 5 / 1 = 0.005)
+        assert!(adjusted[0] <= 0.01);
+        // Fifth hypothesis should remain non-significant
+        assert_eq!(adjusted[4], 0.50);
+    }
+
+    #[test]
+    fn test_informational_alpha_engine_evaluation() {
+        let trades = generate_test_trade_sequence();
+        let mut smart_set = HashSet::new();
+        smart_set.insert("0x2222222222222222222222222222222222222222".to_string());
+
+        let results = InformationalAlphaEngine::evaluate_all_strategies(
+            &trades[..5],
+            &trades[5..],
+            &smart_set,
+            Decimal::from(10000),
+            Decimal::from(1000),
+            30,
+        );
+
+        assert!(!results.is_empty());
+        // Verify all 5 families are evaluated
+        let families: HashSet<StrategyFamily> = results.iter().map(|r| r.family).collect();
+        assert!(families.contains(&StrategyFamily::DirectCopy));
+        assert!(families.contains(&StrategyFamily::Confirmation));
+        assert!(families.contains(&StrategyFamily::Consensus));
+        assert!(families.contains(&StrategyFamily::WalletMomentum));
+        assert!(families.contains(&StrategyFamily::TokenAttention));
     }
 }
