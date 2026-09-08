@@ -16,7 +16,7 @@ sol! {
 
     // Uniswap V2 Swap event
     #[derive(Debug, PartialEq, Eq)]
-    event SwapV2(
+    event Swap(
         address indexed sender,
         uint256 amount0In,
         uint256 amount1In,
@@ -90,7 +90,7 @@ impl EventDecoder {
             data: alloy::primitives::LogData::new(topics.to_vec(), data.to_vec().into())?,
         };
 
-        if let Ok(swap) = SwapV2::decode_log(&alloy_log) {
+        if let Ok(swap) = Swap::decode_log(&alloy_log) {
             let recipient = format!("{:?}", swap.to);
             let amount_in_u256 = if swap.amount0In > U256::ZERO {
                 swap.amount0In
@@ -120,6 +120,23 @@ impl EventDecoder {
                 price_usd,
                 timestamp,
             });
+        }
+        None
+    }
+
+    /// Decodes a Uniswap V2 Sync event returning (reserve0, reserve1)
+    pub fn decode_sync(
+        pool_address: &str,
+        topics: &[alloy::primitives::B256],
+        data: &[u8],
+    ) -> Option<(u128, u128)> {
+        let alloy_log = AlloyLog {
+            address: Address::from_str(pool_address).ok()?,
+            data: alloy::primitives::LogData::new(topics.to_vec(), data.to_vec().into())?,
+        };
+
+        if let Ok(sync) = Sync::decode_log(&alloy_log) {
+            return Some((sync.reserve0.to::<u128>(), sync.reserve1.to::<u128>()));
         }
         None
     }

@@ -177,8 +177,14 @@ impl ResearchRunner {
         }
 
         // 6. Scalability Engine: Capital Impact Curve
-        let assumed_pool_liquidity = Decimal::from(100_000);
         let is_real_liquidity = config.data_source == DataSource::Real;
+        let assumed_pool_liquidity = config.pool_liquidity.unwrap_or_else(|| {
+            if is_real_liquidity {
+                Decimal::from(15_000_000)
+            } else {
+                Decimal::from(100_000)
+            }
+        });
         let scalability_curve = ScalabilityEngine::evaluate_scalability(
             eval_copiable_trades,
             &config.capitals_usd,

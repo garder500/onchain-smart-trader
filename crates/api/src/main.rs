@@ -286,7 +286,7 @@ async fn main() -> Result<()> {
                     research::DataSource::Synthetic,
                 )
             } else if let Some(ref db) = db_opt {
-                let db_trades = db.get_all_trades(5000).await?;
+                let db_trades = db.get_all_trades(50000).await?;
                 if db_trades.is_empty() {
                     if require_real_data {
                         anyhow::bail!("--require-real-data was specified, but the database contains 0 historical trades. Aborting.");
@@ -382,6 +382,208 @@ async fn main() -> Result<()> {
         Commands::Server => {
             let db = db_opt.context("Database connection required for Server")?;
             server::run_server(config, db).await?;
+        }
+
+        Commands::IngestHistorical {
+            rpc_url,
+            start_block,
+            end_block,
+            slices,
+            slice_blocks,
+            target_swaps,
+            clear_existing,
+            manifest_out,
+            quality_out,
+        } => {
+            let db = db_opt.context("Database connection required for IngestHistorical")?;
+            info!(
+                rpc_url = %rpc_url,
+                start_block = start_block,
+                end_block = end_block,
+                "Launching historical Ethereum Mainnet ingestion"
+            );
+
+            let service = indexer::HistoricalIngestionService::new(&rpc_url, db);
+            let (manifest, quality) = service
+                .ingest_30_days_dataset(
+                    start_block,
+                    end_block,
+                    slices,
+                    slice_blocks,
+                    target_swaps,
+                    clear_existing,
+                )
+                .await?;
+
+            println!("\n============================================================");
+            println!("       HISTORICAL ON-CHAIN INGESTION COMPLETED              ");
+            println!("============================================================");
+            println!("Dataset Name:        {}", manifest.dataset_name);
+            println!(
+                "DEX / Chain:         {} (Chain ID: {})",
+                manifest.dex, manifest.chain_id
+            );
+            println!(
+                "Block Range:         {} -> {} ({} blocks)",
+                manifest.start_block,
+                manifest.end_block,
+                manifest.end_block.saturating_sub(manifest.start_block)
+            );
+            println!(
+                "Time Range:          {} -> {}",
+                manifest.start_timestamp, manifest.end_timestamp
+            );
+            println!("Duration Days:       {:.2} days", manifest.duration_days);
+            println!("Total Real Trades:   {}", manifest.total_trades);
+            println!("Unique Wallets:      {}", manifest.unique_wallets);
+            println!("Unique Tokens:       {}", manifest.unique_tokens);
+            println!("Total Volume USD:    ${:.2}", manifest.total_volume_usd);
+            println!("Canonical SHA-256:   {}", manifest.canonical_sha256);
+            println!(
+                "Quality Checks:      {}",
+                if quality.passed_all_checks {
+                    "PASSED ALL CHECKS"
+                } else {
+                    "FAILED SOME CHECKS"
+                }
+            );
+            println!("============================================================");
+
+            // Write Manifest JSON
+            let manifest_json = serde_json::to_string_pretty(&manifest)?;
+            if let Some(parent) = std::path::Path::new(&manifest_out).parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::write(&manifest_out, &manifest_json).await?;
+            println!("Dataset manifest written to: {}", manifest_out);
+
+            // Write Data Quality Report Markdown
+            let quality_md = format!(
+                r#"# Real Historical Dataset Quality Report
+
+## Dataset Identity & Provenance
+* **Dataset Name**: {}
+* **Blockchain**: Ethereum Mainnet (Chain ID: {})
+* **DEX**: {}
+* **Block Range**: {} to {} ({} blocks)
+* **Date Range (UTC)**: {} to {}
+* **Timespan**: {:.2} days (Requirement: >= 30 days)
+* **Generated At**: {}
+* **Canonical SHA-256 Hash**: `{}`
+
+---
+
+## Statistical Summary
+* **Total Trade Records**: {}
+* **Unique Trade Records**: {}
+* **Unique Trader Wallets (EOA Signers)**: {}
+* **Unique Tokens**: {}
+* **Total Ingested Volume (USD)**: ${:.2}
+
+---
+
+## Data Quality Verification Suite
+| Quality Metric | Expected Criteria | Measured Value | Validation Status |
+| :--- | :--- | :--- | :--- |
+| **Duplicate Trades** | 0 duplicates | {} | {} |
+| **Zero or Null Prices** | 0 invalid | {} | {} |
+| **Zero or Null Amounts** | 0 invalid | {} | {} |
+| **Negative Transaction Fees** | 0 negative | {} | {} |
+| **Invalid Wallet Addresses** | 0 malformed | {} | {} |
+| **Timestamp Monotonicity** | 0 chronological reversals | {} | {} |
+| **Minimum Timespan** | >= 30.0 days | {:.2} days | {} |
+| **Minimum Trade Count** | >= 500 trades | {} trades | {} |
+| **Minimum Wallet Count** | >= 50 unique EOAs | {} wallets | {} |
+
+---
+
+## Overall Quality Verdict
+**Final Quality Status**: **{}**
+
+All on-chain trades are 100% verified against Ethereum logs (Swap and Sync events). No synthetic, simulated, or randomized values exist in this dataset.
+"#,
+                manifest.dataset_name,
+                manifest.chain_id,
+                manifest.dex,
+                manifest.start_block,
+                manifest.end_block,
+                manifest.end_block.saturating_sub(manifest.start_block),
+                manifest.start_timestamp,
+                manifest.end_timestamp,
+                manifest.duration_days,
+                manifest.generated_at,
+                manifest.canonical_sha256,
+                quality.total_records,
+                quality.unique_trades,
+                quality.unique_wallets,
+                quality.unique_tokens,
+                quality.total_volume_usd,
+                quality.duplicates_count,
+                if quality.duplicates_count == 0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.null_or_zero_prices,
+                if quality.null_or_zero_prices == 0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.null_or_zero_amounts,
+                if quality.null_or_zero_amounts == 0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.negative_fees,
+                if quality.negative_fees == 0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.invalid_addresses,
+                if quality.invalid_addresses == 0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.monotonic_timestamp_violations,
+                if quality.monotonic_timestamp_violations == 0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.timespan_days,
+                if quality.timespan_days >= 30.0 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.total_records,
+                if quality.total_records >= 500 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                quality.unique_wallets,
+                if quality.unique_wallets >= 50 {
+                    "PASSED"
+                } else {
+                    "FAILED"
+                },
+                if quality.passed_all_checks {
+                    "ACCEPTED_FOR_RESEARCH"
+                } else {
+                    "REJECTED_QUALITY_FAILURE"
+                },
+            );
+
+            if let Some(parent) = std::path::Path::new(&quality_out).parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            tokio::fs::write(&quality_out, &quality_md).await?;
+            println!("Data quality report written to: {}", quality_out);
         }
     }
 

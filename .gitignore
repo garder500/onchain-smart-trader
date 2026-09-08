@@ -9,7 +9,8 @@
 !.env.example
 
 # Database data
-data/
+data/*
+!data/REAL_DATASET_MANIFEST.json
 postgres_data/
 
 # IDE / Editor

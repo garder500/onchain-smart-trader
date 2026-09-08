@@ -62,6 +62,7 @@ pub struct ExperimentConfig {
     pub random_benchmark_runs: usize,
     pub initial_cash: Decimal,
     pub max_open_positions: usize,
+    pub pool_liquidity: Option<Decimal>,
 }
 
 impl Default for ExperimentConfig {
@@ -90,6 +91,7 @@ impl Default for ExperimentConfig {
             random_benchmark_runs: 100,
             initial_cash: Decimal::from(10000),
             max_open_positions: 5,
+            pool_liquidity: None,
         }
     }
 }

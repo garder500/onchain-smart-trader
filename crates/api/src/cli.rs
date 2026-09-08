@@ -86,4 +86,43 @@ pub enum Commands {
 
     /// Launch Axum REST API server
     Server,
+
+    /// Ingest genuine historical Ethereum Mainnet Uniswap V2 trades & liquidity
+    IngestHistorical {
+        /// Custom RPC HTTP URL (default: https://gateway.tenderly.co/public/mainnet)
+        #[arg(long, default_value = "https://gateway.tenderly.co/public/mainnet")]
+        rpc_url: String,
+
+        /// Start block number (default: 25706500, approx 31 days prior)
+        #[arg(long, default_value = "25706500")]
+        start_block: u64,
+
+        /// End block number (default: 25929500)
+        #[arg(long, default_value = "25929500")]
+        end_block: u64,
+
+        /// Number of sampling slices distributed across the block range
+        #[arg(long, default_value = "30")]
+        slices: usize,
+
+        /// Blocks per sampling slice
+        #[arg(long, default_value = "1000")]
+        slice_blocks: u64,
+
+        /// Target minimum swaps to ingest
+        #[arg(long, default_value = "1000")]
+        target_swaps: usize,
+
+        /// Clear existing database records before ingestion to guarantee data purity
+        #[arg(long, default_value_t = true)]
+        clear_existing: bool,
+
+        /// Path to save dataset manifest JSON
+        #[arg(long, default_value = "data/REAL_DATASET_MANIFEST.json")]
+        manifest_out: String,
+
+        /// Path to save data quality report markdown
+        #[arg(long, default_value = "docs/REAL_DATA_QUALITY_REPORT.md")]
+        quality_out: String,
+    },
 }

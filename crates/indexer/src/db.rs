@@ -531,6 +531,30 @@ impl Database {
             .collect())
     }
 
+    /// Truncates all tables for a clean real historical dataset load
+    pub async fn clear_all_data(&self) -> Result<()> {
+        sqlx::query(
+            "TRUNCATE TABLE portfolio_snapshots, paper_positions, paper_orders, signals, strategy_runs, token_risk_scores, wallet_scores, trades, transactions, tokens, wallets CASCADE;"
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn get_trade_count(&self) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM trades")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
+    }
+
+    pub async fn get_unique_wallet_count(&self) -> Result<i64> {
+        let count: i64 = sqlx::query_scalar("SELECT count(DISTINCT wallet_address) FROM trades")
+            .fetch_one(&self.pool)
+            .await?;
+        Ok(count)
+    }
+
     // --- Wallet Scores ---
     pub async fn save_wallet_score(&self, score: &WalletScore) -> Result<()> {
         let dummy_wallet = Wallet::new(score.wallet_address.clone(), score.evaluated_at);
