@@ -104,6 +104,8 @@ pub struct DatasetManifest {
     pub unique_tokens: usize,
     pub total_volume_usd: Decimal,
     pub canonical_sha256: String,
+    #[serde(default)]
+    pub parent_manifest_sha256: Option<String>,
     pub generated_at: DateTime<Utc>,
     pub quality_checks_passed: bool,
 }
@@ -332,6 +334,7 @@ impl HistoricalIngestionService {
             unique_tokens: unique_tokens_set.len(),
             total_volume_usd: total_vol,
             canonical_sha256,
+            parent_manifest_sha256: None,
             generated_at: Utc::now(),
             quality_checks_passed: quality_report.passed_all_checks,
         };

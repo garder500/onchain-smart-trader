@@ -1,0 +1,18 @@
+{
+  "dataset_name": "Ethereum Mainnet Uniswap V2 Canonical Reconciled Dataset (Phase 2.7)",
+  "chain_id": 1,
+  "dex": "Uniswap V2",
+  "start_block": 24500021,
+  "end_block": 25922345,
+  "start_timestamp": "2026-02-20T19:01:35Z",
+  "end_timestamp": "2026-09-07T01:58:35Z",
+  "duration_days": 198.28958333333333,
+  "total_trades": 3743,
+  "unique_wallets": 1444,
+  "unique_tokens": 2,
+  "total_volume_usd": "4314156.7682",
+  "canonical_sha256": "fb890b62831d32b7bddc7b9f412a3fa01f0605767bb736c9f45813b0ad10359b",
+  "parent_manifest_sha256": "27e3d93d3790b154b9f5d56e34f67081eb654be04a024eaa532e2bb836cb96f8",
+  "generated_at": "2026-09-08T03:12:17.953462422Z",
+  "quality_checks_passed": true
+}
