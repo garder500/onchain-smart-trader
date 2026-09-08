@@ -495,4 +495,175 @@ impl ScientificValidator {
 
         adjusted_indexed
     }
+
+    /// Cross-Pool Generalization Analysis:
+    /// Trains on pools in `train_pools` (e.g. USDC/WETH, WBTC/WETH) and evaluates on `test_pool` (e.g. DAI/WETH or USDT/WETH)
+    pub fn cross_pool_analysis(
+        all_trades: &[Trade],
+        train_pool_addrs: &[String],
+        test_pool_addr: &str,
+        min_wallet_trades: usize,
+    ) -> crate::types::CrossPoolEvaluation {
+        let train_pool_set: HashSet<String> = train_pool_addrs.iter().cloned().collect();
+
+        let train_trades: Vec<Trade> = all_trades
+            .iter()
+            .filter(|t| train_pool_set.contains(t.token_address.as_str()))
+            .cloned()
+            .collect();
+
+        let test_trades: Vec<Trade> = all_trades
+            .iter()
+            .filter(|t| t.token_address.as_str() == test_pool_addr)
+            .cloned()
+            .collect();
+
+        let train_end = train_trades
+            .last()
+            .map(|t| t.timestamp)
+            .unwrap_or_else(Utc::now);
+
+        let selected = WalletResearchEngine::select_copiable_wallets_as_of(
+            &train_trades,
+            train_end,
+            min_wallet_trades,
+        );
+        let selected_addrs: HashSet<String> = selected
+            .into_iter()
+            .filter(|w| w.copiable)
+            .map(|w| w.wallet_address)
+            .collect();
+
+        let test_copiable: Vec<Trade> = test_trades
+            .iter()
+            .filter(|t| selected_addrs.contains(t.wallet_address.as_str()))
+            .cloned()
+            .collect();
+
+        let m_test = Self::evaluate_slice(&test_copiable);
+        let m_train = Self::evaluate_slice(&train_trades);
+
+        let gen_ratio = if m_train.net_pnl > Decimal::ZERO {
+            (m_test.net_pnl / m_train.net_pnl).max(Decimal::ZERO)
+        } else {
+            Decimal::ZERO
+        };
+
+        crate::types::CrossPoolEvaluation {
+            train_pools: train_pool_addrs.to_vec(),
+            test_pool: test_pool_addr.to_string(),
+            pool_type: "CROSS_PAIR".into(),
+            net_pnl: m_test.net_pnl,
+            win_rate: m_test.win_rate,
+            out_of_sample_sharpe: m_test.trade_level_sharpe,
+            trade_count: test_copiable.len(),
+            generalization_ratio: gen_ratio,
+        }
+    }
+
+    /// Unseen Wallet Evaluation:
+    /// Segregates performance on:
+    /// 1. Known wallets (discovered in Train)
+    /// 2. Unseen wallets (existing wallets in Test that were NOT selected in Train)
+    /// 3. New wallets (wallets whose first seen timestamp is > Train cutoff)
+    pub fn unseen_wallet_analysis(
+        train_trades: &[Trade],
+        test_trades: &[Trade],
+        selected_wallets: &HashSet<String>,
+        _train_end: DateTime<Utc>,
+    ) -> crate::types::UnseenWalletEvaluation {
+        let known_trades: Vec<Trade> = test_trades
+            .iter()
+            .filter(|t| selected_wallets.contains(t.wallet_address.as_str()))
+            .cloned()
+            .collect();
+
+        let mut train_seen_wallets = HashSet::new();
+        for t in train_trades {
+            train_seen_wallets.insert(t.wallet_address.as_str().to_string());
+        }
+
+        let unseen_existing_trades: Vec<Trade> = test_trades
+            .iter()
+            .filter(|t| {
+                train_seen_wallets.contains(t.wallet_address.as_str())
+                    && !selected_wallets.contains(t.wallet_address.as_str())
+            })
+            .cloned()
+            .collect();
+
+        let new_post_train_trades: Vec<Trade> = test_trades
+            .iter()
+            .filter(|t| {
+                !train_seen_wallets.contains(t.wallet_address.as_str())
+                    && !selected_wallets.contains(t.wallet_address.as_str())
+            })
+            .cloned()
+            .collect();
+
+        let m_known = Self::evaluate_slice(&known_trades);
+        let m_unseen = Self::evaluate_slice(&unseen_existing_trades);
+        let m_new = Self::evaluate_slice(&new_post_train_trades);
+
+        crate::types::UnseenWalletEvaluation {
+            known_wallets_trades: known_trades.len(),
+            known_wallets_sharpe: m_known.trade_level_sharpe,
+            known_wallets_pnl: m_known.net_pnl,
+            unseen_wallets_trades: unseen_existing_trades.len(),
+            unseen_wallets_sharpe: m_unseen.trade_level_sharpe,
+            unseen_wallets_pnl: m_unseen.net_pnl,
+            new_post_train_wallets_trades: new_post_train_trades.len(),
+            new_post_train_wallets_sharpe: m_new.trade_level_sharpe,
+            new_post_train_wallets_pnl: m_new.net_pnl,
+        }
+    }
+
+    /// Market Regime Evaluation:
+    /// Evaluates strategy returns under High vs Low Volatility, High vs Low Liquidity regimes
+    pub fn regime_analysis(evaluated_trades: &[Trade]) -> Vec<crate::types::RegimePerformance> {
+        if evaluated_trades.is_empty() {
+            return Vec::new();
+        }
+
+        let mut sorted = evaluated_trades.to_vec();
+        sorted.sort_by_key(|t| t.timestamp);
+
+        // Partition by volume/liquidity size (median volume as threshold)
+        let mut volumes: Vec<Decimal> = sorted.iter().map(|t| t.volume_usd).collect();
+        volumes.sort();
+        let median_vol = volumes[volumes.len() / 2];
+
+        let high_vol_trades: Vec<Trade> = sorted
+            .iter()
+            .filter(|t| t.volume_usd >= median_vol)
+            .cloned()
+            .collect();
+        let low_vol_trades: Vec<Trade> = sorted
+            .iter()
+            .filter(|t| t.volume_usd < median_vol)
+            .cloned()
+            .collect();
+
+        let m_high = Self::evaluate_slice(&high_vol_trades);
+        let m_low = Self::evaluate_slice(&low_vol_trades);
+
+        vec![
+            crate::types::RegimePerformance {
+                regime: crate::types::MarketRegime::HighLiquidity,
+                trade_count: high_vol_trades.len(),
+                net_pnl: m_high.net_pnl,
+                win_rate: m_high.win_rate,
+                trade_level_sharpe: m_high.trade_level_sharpe,
+                profit_factor: m_high.profit_factor,
+            },
+            crate::types::RegimePerformance {
+                regime: crate::types::MarketRegime::LowLiquidity,
+                trade_count: low_vol_trades.len(),
+                net_pnl: m_low.net_pnl,
+                win_rate: m_low.win_rate,
+                trade_level_sharpe: m_low.trade_level_sharpe,
+                profit_factor: m_low.profit_factor,
+            },
+        ]
+    }
 }

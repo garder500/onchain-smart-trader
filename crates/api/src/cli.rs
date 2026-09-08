@@ -132,15 +132,15 @@ pub enum Commands {
         target_swaps: usize,
 
         /// Clear existing database records before ingestion to guarantee data purity
-        #[arg(long, default_value_t = true)]
+        #[arg(long, default_value_t = false)]
         clear_existing: bool,
 
         /// Path to save dataset manifest JSON
-        #[arg(long, default_value = "data/REAL_DATASET_MANIFEST.json")]
+        #[arg(long, default_value = "data/PHASE2_6_DATASET_MANIFEST.json")]
         manifest_out: String,
 
         /// Path to save data quality report markdown
-        #[arg(long, default_value = "docs/REAL_DATA_QUALITY_REPORT.md")]
+        #[arg(long, default_value = "docs/PHASE2_6_DATA_QUALITY.md")]
         quality_out: String,
     },
 }

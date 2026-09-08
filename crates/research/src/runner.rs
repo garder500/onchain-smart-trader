@@ -357,6 +357,38 @@ impl ResearchRunner {
             conclusion,
         };
 
+        // 11c. Market Regime Breakdown
+        let regime_breakdown = ScientificValidator::regime_analysis(eval_trades);
+
+        // 11d. Unseen Wallet Generalization
+        let unseen_wallet_results = Some(ScientificValidator::unseen_wallet_analysis(
+            &train_all,
+            eval_trades,
+            &selected_wallet_set,
+            train_end_timestamp,
+        ));
+
+        // 11e. Cross-Pool Generalization (Train on Pool 0, Test on Pool 1 if multiple exist)
+        let unique_pools: Vec<String> = sorted_trades
+            .iter()
+            .map(|t| t.token_address.as_str().to_string())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let cross_pool_results = if unique_pools.len() >= 2 {
+            let train_pool = vec![unique_pools[0].clone()];
+            let test_pool = &unique_pools[1];
+            vec![ScientificValidator::cross_pool_analysis(
+                &sorted_trades,
+                &train_pool,
+                test_pool,
+                config.min_wallet_trades,
+            )]
+        } else {
+            Vec::new()
+        };
+
         ExperimentReport {
             experiment_id,
             created_at,
@@ -382,9 +414,9 @@ impl ResearchRunner {
             verdict,
             strategy_family_results,
             multiple_testing_report,
-            regime_breakdown: Vec::new(),
-            cross_pool_results: Vec::new(),
-            unseen_wallet_results: None,
+            regime_breakdown,
+            cross_pool_results,
+            unseen_wallet_results,
         }
     }
 }

@@ -11,6 +11,7 @@
 # Database data
 data/*
 !data/REAL_DATASET_MANIFEST.json
+!data/PHASE2_6_DATASET_MANIFEST.json
 postgres_data/
 
 # IDE / Editor

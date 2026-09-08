@@ -1,0 +1,17 @@
+{
+  "dataset_name": "Ethereum Mainnet Uniswap V2 Real Dataset",
+  "chain_id": 1,
+  "dex": "Uniswap V2",
+  "start_block": 24500000,
+  "end_block": 25929500,
+  "start_timestamp": "2026-02-20T19:01:35Z",
+  "end_timestamp": "2026-09-08T03:01:02.627342Z",
+  "duration_days": 199.3329513888889,
+  "total_trades": 3788,
+  "unique_wallets": 1450,
+  "unique_tokens": 14,
+  "total_volume_usd": "4345656.7682",
+  "canonical_sha256": "27e3d93d3790b154b9f5d56e34f67081eb654be04a024eaa532e2bb836cb96f8",
+  "generated_at": "2026-09-08T03:00:27.210244841Z",
+  "quality_checks_passed": true
+}

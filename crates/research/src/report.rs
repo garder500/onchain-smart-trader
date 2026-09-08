@@ -349,6 +349,146 @@ impl ReportGenerator {
             ));
         }
 
+        // 11. Ablation Study
+        if !report.ablation_results.is_empty() {
+            md.push_str("## 11. Ablation Study (Factor Attribution)\n\n");
+            md.push_str(
+                "| Ablation Variant | Description | Net PnL ($) | Trade Sharpe | PnL Delta (%) |\n",
+            );
+            md.push_str("|---|---|---|---|---|\n");
+            for a in &report.ablation_results {
+                md.push_str(&format!(
+                    "| `{}` | {} | `${:.2}` | `{}` | `{:.2}%` |\n",
+                    a.variant_name,
+                    a.description,
+                    a.net_pnl,
+                    a.trade_level_sharpe
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "N/A".into()),
+                    a.pnl_delta_pct
+                ));
+            }
+            md.push('\n');
+        }
+
+        // 12. Walk-Forward Stability Analysis
+        if !report.walk_forward_windows.is_empty() {
+            md.push_str("## 12. Walk-Forward Stability Windows\n\n");
+            md.push_str("| Window | Train Window | Test Window | Selected Wallets | IS Sharpe | OOS Sharpe | Degradation (%) |\n");
+            md.push_str("|---|---|---|---|---|---|---|\n");
+            for w in &report.walk_forward_windows {
+                md.push_str(&format!(
+                    "| Window {} | {} -> {} | {} -> {} | `{}` | `{}` | `{}` | `{:.1}%` |\n",
+                    w.window_index,
+                    w.train_start.format("%Y-%m-%d"),
+                    w.train_end.format("%Y-%m-%d"),
+                    w.test_start.format("%Y-%m-%d"),
+                    w.test_end.format("%Y-%m-%d"),
+                    w.selected_wallets_count,
+                    w.in_sample_sharpe
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "N/A".into()),
+                    w.out_of_sample_sharpe
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "N/A".into()),
+                    w.degradation_pct
+                ));
+            }
+            md.push('\n');
+        }
+
+        // 13. Market Regime Breakdown
+        if !report.regime_breakdown.is_empty() {
+            md.push_str("## 13. Market Regime Breakdown\n\n");
+            md.push_str("| Market Regime | Trades | Net PnL ($) | Win Rate | Trade Sharpe | Profit Factor |\n");
+            md.push_str("|---|---|---|---|---|---|\n");
+            for r in &report.regime_breakdown {
+                md.push_str(&format!(
+                    "| `{}` | `{}` | `${:.2}` | `{:.1}%` | `{}` | `{:.2}` |\n",
+                    r.regime,
+                    r.trade_count,
+                    r.net_pnl,
+                    r.win_rate * rust_decimal::Decimal::from(100),
+                    r.trade_level_sharpe
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "N/A".into()),
+                    r.profit_factor
+                ));
+            }
+            md.push('\n');
+        }
+
+        // 14. Cross-Pool Generalization
+        if !report.cross_pool_results.is_empty() {
+            md.push_str("## 14. Cross-Pool Generalization\n\n");
+            md.push_str("| Train Pools | Test Pool | Pool Type | Trades | Net PnL ($) | Win Rate | OOS Sharpe | Generalization Ratio |\n");
+            md.push_str("|---|---|---|---|---|---|---|---|\n");
+            for cp in &report.cross_pool_results {
+                md.push_str(&format!(
+                    "| `{}` | `{}` | `{}` | `{}` | `${:.2}` | `{:.1}%` | `{}` | `{:.2}x` |\n",
+                    cp.train_pools.join(", "),
+                    cp.test_pool,
+                    cp.pool_type,
+                    cp.trade_count,
+                    cp.net_pnl,
+                    cp.win_rate * rust_decimal::Decimal::from(100),
+                    cp.out_of_sample_sharpe
+                        .map(|s| format!("{:.2}", s))
+                        .unwrap_or_else(|| "N/A".into()),
+                    cp.generalization_ratio
+                ));
+            }
+            md.push('\n');
+        }
+
+        // 15. Unseen Wallet Generalization
+        if let Some(ref uw) = report.unseen_wallet_results {
+            md.push_str("## 15. Unseen Wallet Generalization Analysis\n\n");
+            md.push_str("| Wallet Cohort | Evaluated Trades | Net PnL ($) | Trade Sharpe | Generalization Assessment |\n");
+            md.push_str("|---|---|---|---|---|\n");
+            md.push_str(&format!(
+                "| Known Selected Wallets | `{}` | `${:.2}` | `{}` | In-Sample / Out-Of-Sample Baseline |\n",
+                uw.known_wallets_trades,
+                uw.known_wallets_pnl,
+                uw.known_wallets_sharpe.map(|s| format!("{:.2}", s)).unwrap_or_else(|| "N/A".into())
+            ));
+            md.push_str(&format!(
+                "| Unseen Pre-Existing Wallets | `{}` | `${:.2}` | `{}` | Filtered Out in Train Period |\n",
+                uw.unseen_wallets_trades,
+                uw.unseen_wallets_pnl,
+                uw.unseen_wallets_sharpe.map(|s| format!("{:.2}", s)).unwrap_or_else(|| "N/A".into())
+            ));
+            md.push_str(&format!(
+                "| New Post-Train Wallets | `{}` | `${:.2}` | `{}` | Novel Wallets First Seen in Test Period |\n\n",
+                uw.new_post_train_wallets_trades,
+                uw.new_post_train_wallets_pnl,
+                uw.new_post_train_wallets_sharpe.map(|s| format!("{:.2}", s)).unwrap_or_else(|| "N/A".into())
+            ));
+        }
+
+        // 16. Structural Failure Modes & Execution Realities
+        md.push_str("## 16. Structural Failure Modes & Execution Realities\n\n");
+        md.push_str("1. **Adverse Selection & Latency Tax**: MEV searchers and toxic flow dominate sub-second price moves. At zero latency on-chain copy trading assumes simultaneous block inclusion in the same transaction position, which is structurally impossible for public reactive copy-traders without builder private orderflow.\n");
+        md.push_str("2. **Survivorship Bias Elimination**: Profiling requires full round-trip attribution including unclosed positions and rug-pull dead ends. High historical win rates frequently collapse when post-entry liquidity evaporation is accounted for.\n");
+        md.push_str("3. **Slippage & Price Impact Asymmetry**: As order size approaches pool reserve thresholds, quadratic constant-product slippage compounds, converting paper trading gains into net losses.\n");
+        md.push_str("4. **Multiple Hypothesis Overfitting**: Testing numerous latency and parameter permutations inflates naive discovery rates; Benjamini-Hochberg FDR adjustments ensure rigorous discipline against spurious noise.\n\n");
+
+        // 17. Scientific Conclusion & Recommendation
+        md.push_str("## 17. Final Scientific Recommendation & Next Steps\n\n");
+        md.push_str(&format!(
+            "- **Final Status**: `{}`\n",
+            report.verdict.status
+        ));
+        md.push_str(&format!(
+            "- **Conclusion**: {}\n",
+            report.verdict.conclusion
+        ));
+        if report.verdict.status == crate::types::VerdictStatus::EmpiricallySupported {
+            md.push_str("- **Next Step**: Proceed to execution architecture, builder integration, and private relay connections under strictly constrained sizing.\n");
+        } else {
+            md.push_str("- **Next Step**: Do NOT deploy real capital to naive direct copy trading. Explore informational confirmation, multi-wallet consensus, or private order-flow pre-confirmations.\n");
+        }
+
         md
     }
 }

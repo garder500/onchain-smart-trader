@@ -1405,4 +1405,69 @@ mod tests {
         assert!(families.contains(&StrategyFamily::WalletMomentum));
         assert!(families.contains(&StrategyFamily::TokenAttention));
     }
+
+    #[test]
+    fn test_cross_pool_generalization() {
+        let mut trades = generate_test_trade_sequence();
+        // Give half trades a different token/pool
+        for t in trades.iter_mut().skip(5) {
+            t.token_address = "0x9999999999999999999999999999999999999999".into();
+        }
+
+        let train_pools = vec!["0x1111111111111111111111111111111111111111".to_string()];
+        let test_pool = "0x9999999999999999999999999999999999999999";
+
+        let result = ScientificValidator::cross_pool_analysis(&trades, &train_pools, test_pool, 1);
+        assert_eq!(result.test_pool, test_pool);
+        assert_eq!(result.train_pools, train_pools);
+    }
+
+    #[test]
+    fn test_unseen_wallet_generalization() {
+        let trades = generate_test_trade_sequence();
+        let train_trades = &trades[..5];
+        let test_trades = &trades[5..];
+        let mut selected_wallets = HashSet::new();
+        selected_wallets.insert("0x2222222222222222222222222222222222222222".to_string());
+        let train_end = train_trades.last().unwrap().timestamp;
+
+        let eval = ScientificValidator::unseen_wallet_analysis(
+            train_trades,
+            test_trades,
+            &selected_wallets,
+            train_end,
+        );
+
+        assert_eq!(
+            eval.known_wallets_trades
+                + eval.unseen_wallets_trades
+                + eval.new_post_train_wallets_trades,
+            test_trades.len()
+        );
+    }
+
+    #[test]
+    fn test_market_regime_analysis() {
+        let trades = generate_test_trade_sequence();
+        let regimes = ScientificValidator::regime_analysis(&trades);
+        assert_eq!(regimes.len(), 2);
+        assert_eq!(regimes[0].regime, MarketRegime::HighLiquidity);
+        assert_eq!(regimes[1].regime, MarketRegime::LowLiquidity);
+    }
+
+    #[test]
+    fn test_phase2_6_dataset_manifest_integrity() {
+        let manifest_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../data/PHASE2_6_DATASET_MANIFEST.json"
+        );
+        if std::path::Path::new(manifest_path).exists() {
+            let content = std::fs::read_to_string(manifest_path).unwrap();
+            let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(parsed["dex"], "Uniswap V2");
+            assert_eq!(parsed["chain_id"], 1);
+            assert!(parsed["total_trades"].as_u64().unwrap() >= 3700);
+            assert!(parsed["quality_checks_passed"].as_bool().unwrap());
+        }
+    }
 }

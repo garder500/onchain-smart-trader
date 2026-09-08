@@ -430,26 +430,33 @@ async fn main() -> Result<()> {
             } else {
                 println!("Database Status:       Disconnected");
             }
-            if let Ok(manifest_content) =
-                tokio::fs::read_to_string("data/REAL_DATASET_MANIFEST.json").await
-            {
-                if let Ok(manifest) =
-                    serde_json::from_str::<indexer::DatasetManifest>(&manifest_content)
-                {
-                    println!("\nDataset Manifest:      data/REAL_DATASET_MANIFEST.json");
-                    println!("Canonical SHA-256:     {}", manifest.canonical_sha256);
-                    println!(
-                        "DEX / Chain:           {} / Chain ID {}",
-                        manifest.dex, manifest.chain_id
-                    );
-                    println!(
-                        "Quality Checks:        {}",
-                        if manifest.quality_checks_passed {
-                            "PASSED"
-                        } else {
-                            "FAILED"
-                        }
-                    );
+            for manifest_path in &[
+                "data/PHASE2_6_DATASET_MANIFEST.json",
+                "data/REAL_DATASET_MANIFEST.json",
+            ] {
+                if let Ok(manifest_content) = tokio::fs::read_to_string(manifest_path).await {
+                    if let Ok(manifest) =
+                        serde_json::from_str::<indexer::DatasetManifest>(&manifest_content)
+                    {
+                        println!("\nDataset Manifest:      {}", manifest_path);
+                        println!("Canonical SHA-256:     {}", manifest.canonical_sha256);
+                        println!(
+                            "DEX / Chain:           {} / Chain ID {}",
+                            manifest.dex, manifest.chain_id
+                        );
+                        println!(
+                            "Duration / Trades:     {:.2} days / {} trades",
+                            manifest.duration_days, manifest.total_trades
+                        );
+                        println!(
+                            "Quality Checks:        {}",
+                            if manifest.quality_checks_passed {
+                                "PASSED"
+                            } else {
+                                "FAILED"
+                            }
+                        );
+                    }
                 }
             }
             println!(
