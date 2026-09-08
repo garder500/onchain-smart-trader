@@ -725,6 +725,15 @@ impl Database {
 
     // --- Signals ---
     pub async fn save_signal(&self, signal: &Signal) -> Result<()> {
+        self.upsert_strategy_run(
+            &signal.strategy_id,
+            "Smart Wallet Copy",
+            &serde_json::json!({}),
+            Decimal::from(1000),
+            Decimal::from(1000),
+        )
+        .await?;
+
         sqlx::query(
             r#"
             INSERT INTO signals (
@@ -804,6 +813,15 @@ impl Database {
 
     // --- Paper Orders ---
     pub async fn save_paper_order(&self, order: &PaperOrder, strategy_id: &str) -> Result<()> {
+        self.upsert_strategy_run(
+            strategy_id,
+            "Smart Wallet Copy",
+            &serde_json::json!({}),
+            Decimal::from(1000),
+            Decimal::from(1000),
+        )
+        .await?;
+
         sqlx::query(
             r#"
             INSERT INTO paper_orders (
@@ -835,6 +853,15 @@ impl Database {
 
     // --- Paper Positions ---
     pub async fn save_paper_position(&self, pos: &Position, strategy_id: &str) -> Result<()> {
+        self.upsert_strategy_run(
+            strategy_id,
+            "Smart Wallet Copy",
+            &serde_json::json!({}),
+            Decimal::from(1000),
+            Decimal::from(1000),
+        )
+        .await?;
+
         sqlx::query(
             r#"
             INSERT INTO paper_positions (
