@@ -103,6 +103,10 @@ impl ReportGenerator {
             );
         }
 
+        if let Some(ref sample) = report.sample_size_assessment {
+            md.push_str(&format!("> **Sample Size Reliability**: `{}`\n\n", sample));
+        }
+
         // Wallet Behavioral Classifications
         md.push_str("## 3. Wallet Behavioral Taxonomy & Persistence\n\n");
         md.push_str("| Wallet Address | Cluster | Persistence Score | Copiable? | Selected in Train? | Notes |\n");
@@ -146,6 +150,30 @@ impl ReportGenerator {
             ));
         }
         md.push('\n');
+
+        if !report.empirical_latencies.is_empty() {
+            md.push_str("### Empirical Subsequent Price Observations (Real Trades)\n\n");
+            md.push_str("| Target Delay | Actual Elapsed (s) | Observed Price ($) | Price Delta (bps) | Observations | Status |\n");
+            md.push_str("|---|---|---|---|---|---|\n");
+            for p in &report.empirical_latencies {
+                md.push_str(&format!(
+                    "| `{}s` | {} | {} | {} | `{}` | `{}` |\n",
+                    p.target_delay_seconds,
+                    p.actual_elapsed_seconds
+                        .map(|e| format!("{:.1}s", e))
+                        .unwrap_or_else(|| "-".into()),
+                    p.observed_price
+                        .map(|v| format!("${:.2}", v))
+                        .unwrap_or_else(|| "-".into()),
+                    p.price_delta_bps
+                        .map(|d| format!("{:.1} bps", d))
+                        .unwrap_or_else(|| "-".into()),
+                    p.sample_size,
+                    p.status
+                ));
+            }
+            md.push('\n');
+        }
 
         // Scalability Curve
         md.push_str("## 5. Capital Scalability Curve (Liquidity Impact)\n\n");
@@ -220,6 +248,65 @@ impl ReportGenerator {
                 .map(|s| format!("{:.2}", s))
                 .unwrap_or_else(|| "N/A".into())
         ));
+
+        // PnL Decomposition Identity
+        if let Some(ref decomp) = report.pnl_decomposition {
+            md.push_str("### PnL Decomposition (Factor Attribution Identity)\n\n");
+            md.push_str("| Component | Amount ($) | Description |\n");
+            md.push_str("|---|---|---|\n");
+            md.push_str(&format!(
+                "| Gross Alpha | `${:.2}` | PnL if filled at signal time with 0 friction |\n",
+                decomp.gross_alpha
+            ));
+            md.push_str(&format!(
+                "| Latency Cost | `-${:.2}` | Adverse slippage from execution delay |\n",
+                decomp.latency_cost
+            ));
+            md.push_str(&format!(
+                "| Market Impact | `-${:.2}` | Constant-product price impact on pool reserves |\n",
+                decomp.market_impact
+            ));
+            md.push_str(&format!(
+                "| DEX Fees | `-${:.2}` | Uniswap V2 LP fee (30 bps per swap) |\n",
+                decomp.dex_fees
+            ));
+            md.push_str(&format!(
+                "| Gas Cost | `-${:.2}` | Transaction gas fees |\n",
+                decomp.gas_cost
+            ));
+            md.push_str(&format!(
+                "| **Net Alpha** | **`${:.2}`** | Realized net PnL after all frictions |\n\n",
+                decomp.net_alpha
+            ));
+        }
+
+        // Effect Size Report
+        if let Some(ref eff) = report.effect_size {
+            md.push_str("### Effect Size & Economic Significance\n\n");
+            md.push_str("| Metric | Value | Interpretation |\n");
+            md.push_str("|---|---|---|\n");
+            md.push_str(&format!(
+                "| Mean Excess Return | `${:.2}` | Strategy mean minus benchmark mean |\n",
+                eff.mean_excess_return
+            ));
+            md.push_str(&format!(
+                "| Median Excess Return | `${:.2}` | Robust central tendency excess |\n",
+                eff.median_excess_return
+            ));
+            md.push_str(&format!(
+                "| Cohen's d | `{}` | Standardized effect size |\n",
+                eff.cohen_d
+                    .map(|d| format!("{:.2}", d))
+                    .unwrap_or_else(|| "N/A".into())
+            ));
+            md.push_str(&format!("| Win Rate Diff vs Benchmark | `{:.1}%` | Relative advantage in winning trade frequency |\n", eff.win_rate_diff_vs_benchmark * rust_decimal::Decimal::from(100)));
+            md.push_str(&format!(
+                "| Sharpe Diff vs Benchmark | `{}` | Risk-adjusted excess performance |\n\n",
+                eff.sharpe_diff_vs_benchmark
+                    .map(|s| format!("{:.2}", s))
+                    .unwrap_or_else(|| "N/A".into())
+            ));
+        }
 
         // Permutation Testing & Bootstrap CI
         md.push_str("## 7. Statistical Rigor: Permutation Testing & Bootstrap CIs\n\n");

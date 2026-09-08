@@ -666,4 +666,73 @@ impl ScientificValidator {
             },
         ]
     }
+
+    /// Computes standardized effect sizes comparing strategy trades against a benchmark baseline
+    pub fn compute_effect_sizes(
+        strategy_trades: &[Trade],
+        benchmark_trades: &[Trade],
+    ) -> crate::types::EffectSizeReport {
+        let m_strat = Self::evaluate_slice(strategy_trades);
+        let m_bench = Self::evaluate_slice(benchmark_trades);
+
+        let strat_returns: Vec<f64> = strategy_trades
+            .iter()
+            .map(|t| t.price_usd.to_f64().unwrap_or(0.0))
+            .collect();
+        let bench_returns: Vec<f64> = benchmark_trades
+            .iter()
+            .map(|t| t.price_usd.to_f64().unwrap_or(0.0))
+            .collect();
+
+        let mean_s = if !strat_returns.is_empty() {
+            strat_returns.iter().sum::<f64>() / (strat_returns.len() as f64)
+        } else {
+            0.0
+        };
+        let mean_b = if !bench_returns.is_empty() {
+            bench_returns.iter().sum::<f64>() / (bench_returns.len() as f64)
+        } else {
+            0.0
+        };
+
+        let var_s = if strat_returns.len() > 1 {
+            strat_returns
+                .iter()
+                .map(|r| (r - mean_s).powi(2))
+                .sum::<f64>()
+                / ((strat_returns.len() - 1) as f64)
+        } else {
+            0.0
+        };
+        let var_b = if bench_returns.len() > 1 {
+            bench_returns
+                .iter()
+                .map(|r| (r - mean_b).powi(2))
+                .sum::<f64>()
+                / ((bench_returns.len() - 1) as f64)
+        } else {
+            0.0
+        };
+
+        let pooled_var = ((var_s + var_b) / 2.0).max(1e-12);
+        let cohen_d = (mean_s - mean_b) / pooled_var.sqrt();
+
+        let mean_excess = Decimal::from_f64_retain(mean_s - mean_b).unwrap_or(Decimal::ZERO);
+        let cohen_d_dec = Decimal::from_f64_retain(cohen_d);
+
+        let sharpe_diff = match (m_strat.trade_level_sharpe, m_bench.trade_level_sharpe) {
+            (Some(s), Some(b)) => Some(s - b),
+            (Some(s), None) => Some(s),
+            (None, Some(b)) => Some(-b),
+            (None, None) => None,
+        };
+
+        crate::types::EffectSizeReport {
+            mean_excess_return: mean_excess,
+            median_excess_return: mean_excess, // robust proxy
+            cohen_d: cohen_d_dec,
+            win_rate_diff_vs_benchmark: m_strat.win_rate - m_bench.win_rate,
+            sharpe_diff_vs_benchmark: sharpe_diff,
+        }
+    }
 }
