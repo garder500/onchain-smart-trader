@@ -1,8 +1,6 @@
 use crate::metrics::MetricsCalculator;
 use chrono::{DateTime, Utc};
-use domain::{
-    ScoreFactors, Trade, WalletAddress, WalletCategory, WalletScore,
-};
+use domain::{ScoreFactors, Trade, WalletAddress, WalletCategory, WalletScore};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
@@ -26,15 +24,20 @@ pub fn calculate_wallet_score(context: &WalletContext) -> WalletScore {
     // 1. Sample size factor (0 to 100)
     // Low trade counts severely penalize the wallet to avoid lucky outliers
     let sample_size_factor = if metrics.total_trades < context.min_trades_threshold {
-        let ratio = Decimal::from(metrics.total_trades) / Decimal::from(context.min_trades_threshold);
+        let ratio =
+            Decimal::from(metrics.total_trades) / Decimal::from(context.min_trades_threshold);
         explanation.push(format!(
             "Insufficient sample size: {} trades (minimum required: {})",
             metrics.total_trades, context.min_trades_threshold
         ));
         ratio * Decimal::from(40)
     } else {
-        let confidence_ratio = (Decimal::from(metrics.total_trades) / Decimal::from(30)).min(Decimal::ONE);
-        explanation.push(format!("Adequate sample size: {} trades", metrics.total_trades));
+        let confidence_ratio =
+            (Decimal::from(metrics.total_trades) / Decimal::from(30)).min(Decimal::ONE);
+        explanation.push(format!(
+            "Adequate sample size: {} trades",
+            metrics.total_trades
+        ));
         Decimal::from(50) + (confidence_ratio * Decimal::from(50))
     };
 
@@ -116,13 +119,19 @@ pub fn calculate_wallet_score(context: &WalletContext) -> WalletScore {
         explanation.push("Status: UNKNOWN due to insufficient trade history".into());
         WalletCategory::Unknown
     } else if overall_score >= Decimal::from(80) && metrics.total_trades >= 10 {
-        explanation.push("Status: EXCELLENT - High win rate, great profit factor and low drawdown".into());
+        explanation
+            .push("Status: EXCELLENT - High win rate, great profit factor and low drawdown".into());
         WalletCategory::Excellent
-    } else if overall_score >= Decimal::from(65) && metrics.total_trades >= context.min_trades_threshold {
-        explanation.push("Status: SMART - Consistent profitability and positive return profile".into());
+    } else if overall_score >= Decimal::from(65)
+        && metrics.total_trades >= context.min_trades_threshold
+    {
+        explanation
+            .push("Status: SMART - Consistent profitability and positive return profile".into());
         WalletCategory::Smart
     } else if overall_score >= Decimal::from(50) {
-        explanation.push("Status: PROMISING - Potential statistical edge but needs more observation".into());
+        explanation.push(
+            "Status: PROMISING - Potential statistical edge but needs more observation".into(),
+        );
         WalletCategory::Promising
     } else {
         explanation.push("Status: UNKNOWN - Does not satisfy smart wallet criteria".into());

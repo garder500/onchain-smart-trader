@@ -89,7 +89,9 @@ mod tests {
         let risk = engine.calculate_token_risk(&ctx);
         assert!(!risk.accepted);
         assert!(risk.reasons.contains(&"liquidity_too_low".to_string()));
-        assert!(risk.reasons.contains(&"holder_concentration_too_high".to_string()));
+        assert!(risk
+            .reasons
+            .contains(&"holder_concentration_too_high".to_string()));
         assert!(risk.reasons.contains(&"deployer_risk_high".to_string()));
     }
 }

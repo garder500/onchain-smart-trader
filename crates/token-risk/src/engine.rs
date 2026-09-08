@@ -50,23 +50,27 @@ impl TokenRiskEngine {
             (ratio * Decimal::from(40)).min(Decimal::from(40))
         } else {
             let scale_cap = Decimal::from_str("100000.0").unwrap();
-            let bonus = ((context.pool_liquidity_usd - self.min_liquidity_usd) / scale_cap).min(Decimal::ONE);
+            let bonus = ((context.pool_liquidity_usd - self.min_liquidity_usd) / scale_cap)
+                .min(Decimal::ONE);
             Decimal::from(60) + (bonus * Decimal::from(40))
         };
 
         // 2. Holder Concentration Score (0 - 100)
-        let holder_concentration_score = if let Some(conc) = context.token.top_10_holder_concentration {
-            if conc > self.max_holder_concentration {
-                reasons.push("holder_concentration_too_high".to_string());
-                let penalty_factor = (conc - self.max_holder_concentration) / (Decimal::ONE - self.max_holder_concentration);
-                (Decimal::ONE - penalty_factor).max(Decimal::ZERO) * Decimal::from(40)
+        let holder_concentration_score =
+            if let Some(conc) = context.token.top_10_holder_concentration {
+                if conc > self.max_holder_concentration {
+                    reasons.push("holder_concentration_too_high".to_string());
+                    let penalty_factor = (conc - self.max_holder_concentration)
+                        / (Decimal::ONE - self.max_holder_concentration);
+                    (Decimal::ONE - penalty_factor).max(Decimal::ZERO) * Decimal::from(40)
+                } else {
+                    let safety_margin =
+                        (self.max_holder_concentration - conc) / self.max_holder_concentration;
+                    Decimal::from(60) + (safety_margin * Decimal::from(40))
+                }
             } else {
-                let safety_margin = (self.max_holder_concentration - conc) / self.max_holder_concentration;
-                Decimal::from(60) + (safety_margin * Decimal::from(40))
-            }
-        } else {
-            Decimal::from(50) // neutral if unknown
-        };
+                Decimal::from(50) // neutral if unknown
+            };
 
         // 3. Deployer Score (0 - 100)
         let deployer_score = if context.deployer_historic_rugs > 0 {
@@ -141,7 +145,8 @@ impl TokenRiskEngine {
         let final_score = combined_score.round_dp(2);
 
         // Rejection logic: score < threshold or critical veto (honeypot or historic rugs)
-        let critical_veto = context.token.is_honeypot == Some(true) || context.deployer_historic_rugs > 0;
+        let critical_veto =
+            context.token.is_honeypot == Some(true) || context.deployer_historic_rugs > 0;
         let accepted = final_score >= self.min_acceptable_score && !critical_veto;
 
         TokenRiskScore {

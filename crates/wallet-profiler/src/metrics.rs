@@ -53,10 +53,12 @@ impl MetricsCalculator {
                     } else {
                         Decimal::ZERO
                     };
-                    buy_queues
-                        .entry(token_key)
-                        .or_default()
-                        .push((trade.price_usd, trade.amount_tokens, trade.timestamp, fee_per_unit));
+                    buy_queues.entry(token_key).or_default().push((
+                        trade.price_usd,
+                        trade.amount_tokens,
+                        trade.timestamp,
+                        fee_per_unit,
+                    ));
                 }
                 TradeSide::Sell => {
                     let mut sell_qty_remaining = trade.amount_tokens;
@@ -81,9 +83,8 @@ impl MetricsCalculator {
                                 Decimal::ZERO
                             };
 
-                            let holding_seconds = (trade.timestamp - buy_time)
-                                .num_seconds()
-                                .max(0) as u64;
+                            let holding_seconds =
+                                (trade.timestamp - buy_time).num_seconds().max(0) as u64;
 
                             round_trips.push(RoundTripTrade {
                                 token_address: token_key.clone(),
