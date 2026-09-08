@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+*.bak
+
+# Environment variables - NEVER COMMIT .env
+.env
+*.env
+!.env.example
+
+# Database data
+data/
+postgres_data/
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
