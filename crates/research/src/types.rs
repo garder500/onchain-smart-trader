@@ -297,6 +297,7 @@ pub enum VerdictStatus {
     NotValidated,
     InsufficientData,
     NoStatisticalEdge,
+    NoEconomicEdge,
     EdgeNotCopiable,
     EdgeTooSmall,
     EdgeUnscalable,
@@ -310,6 +311,7 @@ impl std::fmt::Display for VerdictStatus {
             VerdictStatus::NotValidated => write!(f, "NOT_VALIDATED"),
             VerdictStatus::InsufficientData => write!(f, "INSUFFICIENT_DATA"),
             VerdictStatus::NoStatisticalEdge => write!(f, "NO_STATISTICAL_EDGE"),
+            VerdictStatus::NoEconomicEdge => write!(f, "NO_ECONOMIC_EDGE"),
             VerdictStatus::EdgeNotCopiable => write!(f, "EDGE_NOT_COPIABLE"),
             VerdictStatus::EdgeTooSmall => write!(f, "EDGE_TOO_SMALL"),
             VerdictStatus::EdgeUnscalable => write!(f, "EDGE_UNSCALABLE"),
@@ -364,6 +366,16 @@ pub struct ExperimentReport {
     pub cross_pool_results: Vec<CrossPoolEvaluation>,
     #[serde(default)]
     pub unseen_wallet_results: Option<UnseenWalletEvaluation>,
+    #[serde(default)]
+    pub empirical_latencies: Vec<EmpiricalLatencyPoint>,
+    #[serde(default)]
+    pub pnl_decomposition: Option<PnLDecomposition>,
+    #[serde(default)]
+    pub sample_size_assessment: Option<SampleSizeAssessment>,
+    #[serde(default)]
+    pub effect_size: Option<EffectSizeReport>,
+    #[serde(default)]
+    pub dataset_audit: Option<DatasetAuditSummary>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -405,6 +417,12 @@ pub struct StrategyFamilyResult {
     pub raw_p_value: f64,
     pub fdr_adjusted_p_value: f64,
     pub is_significant_post_fdr: bool,
+    #[serde(default)]
+    pub sample_size_assessment: SampleSizeAssessment,
+    #[serde(default)]
+    pub pnl_decomposition: Option<PnLDecomposition>,
+    #[serde(default)]
+    pub permutation_detail: Option<PermutationDetail>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -498,4 +516,118 @@ pub struct UnseenWalletEvaluation {
     pub new_post_train_wallets_trades: usize,
     pub new_post_train_wallets_sharpe: Option<Decimal>,
     pub new_post_train_wallets_pnl: Decimal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DataSourceQuality {
+    Empirical,
+    Assumption,
+    StressTest,
+    Synthetic,
+}
+
+impl std::fmt::Display for DataSourceQuality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataSourceQuality::Empirical => write!(f, "EMPIRICAL"),
+            DataSourceQuality::Assumption => write!(f, "ASSUMPTION"),
+            DataSourceQuality::StressTest => write!(f, "STRESS_TEST"),
+            DataSourceQuality::Synthetic => write!(f, "SYNTHETIC"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SampleSizeAssessment {
+    #[default]
+    InsufficientSample,
+    WeakSample,
+    AdequateSample,
+    StrongSample,
+}
+
+impl std::fmt::Display for SampleSizeAssessment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SampleSizeAssessment::InsufficientSample => {
+                write!(f, "INSUFFICIENT_SAMPLE (<10 trades)")
+            }
+            SampleSizeAssessment::WeakSample => write!(f, "WEAK_SAMPLE (10-29 trades)"),
+            SampleSizeAssessment::AdequateSample => write!(f, "ADEQUATE_SAMPLE (30-99 trades)"),
+            SampleSizeAssessment::StrongSample => write!(f, "STRONG_SAMPLE (>=100 trades)"),
+        }
+    }
+}
+
+impl SampleSizeAssessment {
+    pub fn from_count(trades: usize) -> Self {
+        if trades < 10 {
+            SampleSizeAssessment::InsufficientSample
+        } else if trades < 30 {
+            SampleSizeAssessment::WeakSample
+        } else if trades < 100 {
+            SampleSizeAssessment::AdequateSample
+        } else {
+            SampleSizeAssessment::StrongSample
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PnLDecomposition {
+    pub gross_alpha: Decimal,
+    pub latency_cost: Decimal,
+    pub market_impact: Decimal,
+    pub dex_fees: Decimal,
+    pub gas_cost: Decimal,
+    pub net_alpha: Decimal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PermutationDetail {
+    pub null_hypothesis: String,
+    pub observed_statistic: Decimal,
+    pub null_mean: Decimal,
+    pub null_std: Decimal,
+    pub p_value: f64,
+    pub iterations: usize,
+    pub seed: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EffectSizeReport {
+    pub mean_excess_return: Decimal,
+    pub median_excess_return: Decimal,
+    pub cohen_d: Option<Decimal>,
+    pub win_rate_diff_vs_benchmark: Decimal,
+    pub sharpe_diff_vs_benchmark: Option<Decimal>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmpiricalLatencyPoint {
+    pub target_delay_seconds: u64,
+    pub actual_elapsed_seconds: Option<f64>,
+    pub observed_price: Option<Decimal>,
+    pub price_delta_bps: Option<Decimal>,
+    pub sample_size: usize,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatasetAuditSummary {
+    pub total_db_swaps: usize,
+    pub canonical_swaps: usize,
+    pub test_polluted_swaps: usize,
+    pub unique_tx_hashes: usize,
+    pub manifest_swaps: usize,
+    pub missing_from_db: usize,
+    pub missing_from_manifest: usize,
+    pub block_min: u64,
+    pub block_max: u64,
+    pub time_min: DateTime<Utc>,
+    pub time_max: DateTime<Utc>,
+    pub pool_distribution: std::collections::HashMap<String, usize>,
+    pub wallet_count: usize,
 }
