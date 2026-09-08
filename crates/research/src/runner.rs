@@ -285,8 +285,11 @@ impl ResearchRunner {
             VerdictStatus::NotValidated
         } else if eval_copiable_trades.len() < 5 {
             VerdictStatus::InsufficientData
-        } else if !permutation_test.is_significant
-            || test_metrics.net_pnl <= Decimal::ZERO
+        } else if !permutation_test.is_significant {
+            VerdictStatus::NoStatisticalEdge
+        } else if test_metrics.gross_pnl > Decimal::ZERO && test_metrics.net_pnl <= Decimal::ZERO {
+            VerdictStatus::NoEconomicEdge
+        } else if test_metrics.net_pnl <= Decimal::ZERO
             || !beats_naive
             || test_metrics.max_drawdown_pct > Decimal::from(35)
         {
@@ -318,6 +321,12 @@ impl ResearchRunner {
                 } else {
                     format!("NO STATISTICAL EDGE: Excessive out-of-sample drawdown ({:.1}% > 35%).", test_metrics.max_drawdown_pct)
                 }
+            }
+            VerdictStatus::NoEconomicEdge => {
+                format!(
+                    "NO ECONOMIC EDGE: Gross trading alpha is positive (${:.2}) but destroyed by execution costs (fees, gas, slippage). Net PnL is ${:.2}.",
+                    test_metrics.gross_pnl, test_metrics.net_pnl
+                )
             }
             VerdictStatus::EdgeNotCopiable => {
                 format!(
@@ -389,6 +398,38 @@ impl ResearchRunner {
             Vec::new()
         };
 
+        // 11f. Empirical Latency Measurements
+        let empirical_latencies = CopiabilityEngine::measure_empirical_latency_distribution(
+            &sorted_trades,
+            &config.delays_seconds,
+        );
+
+        // 11g. Sample Size Assessment
+        let sample_size_assessment = Some(crate::types::SampleSizeAssessment::from_count(
+            eval_copiable_trades.len(),
+        ));
+
+        // 11h. Effect Size Report
+        let effect_size = Some(ScientificValidator::compute_effect_sizes(
+            eval_copiable_trades,
+            eval_trades,
+        ));
+
+        // 11i. Baseline PnL Decomposition
+        let primary_latency_cost = delay_curve
+            .iter()
+            .find(|d| d.delay_seconds == 2)
+            .map(|d| d.slippage_incurred_usd)
+            .unwrap_or(Decimal::ZERO);
+        let pnl_decomposition = Some(crate::types::PnLDecomposition {
+            gross_alpha: test_metrics.gross_pnl,
+            latency_cost: primary_latency_cost,
+            market_impact: Decimal::ZERO,
+            dex_fees: test_metrics.trading_fees,
+            gas_cost: Decimal::ZERO,
+            net_alpha: test_metrics.net_pnl,
+        });
+
         ExperimentReport {
             experiment_id,
             created_at,
@@ -417,6 +458,11 @@ impl ResearchRunner {
             regime_breakdown,
             cross_pool_results,
             unseen_wallet_results,
+            empirical_latencies,
+            pnl_decomposition,
+            sample_size_assessment,
+            effect_size,
+            dataset_audit: None,
         }
     }
 }
