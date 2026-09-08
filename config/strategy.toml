@@ -1,0 +1,32 @@
+# Default strategy & risk parameters
+
+[token_risk]
+liquidity_weight = 0.25
+holder_concentration_weight = 0.20
+deployer_weight = 0.25
+contract_weight = 0.20
+volume_weight = 0.10
+
+# Thresholds
+min_liquidity_usd = 10000.00
+max_top10_concentration = 0.40
+min_volume_24h_usd = 5000.00
+min_token_age_blocks = 10
+
+[smart_wallet]
+min_wallet_score = 65.0
+min_wallet_trades = 5
+min_win_rate = 0.55
+min_profit_factor = 1.30
+max_drawdown = 0.45
+
+[position_sizing]
+mode = "score_weighted" # Options: fixed_percentage, score_weighted, liquidity_adjusted
+fixed_percent = 0.05
+max_liquidity_take_percent = 0.01
+
+[exit_rules]
+take_profit_percent = 0.50
+stop_loss_percent = 0.20
+max_holding_time_seconds = 86400
+copy_wallet_exit = true
